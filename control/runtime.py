@@ -10,6 +10,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from power import (
+    SOCIAL_CONTAINER,
+    docker_container_running,
+    docker_start,
+    docker_stop,
+    leads_is_on,
+    set_leads_on,
+    social_is_running,
+)
+
 REPO = Path(__file__).resolve().parents[1]
 CATALOG = REPO / "catalog" / "agents.json"
 
@@ -60,12 +70,21 @@ def _read_pid(home: Path) -> int | None:
         return None
 
 
-def _env_flags(home: Path) -> dict[str, bool]:
+def _env_flags(home: Path, agent_id: str) -> dict[str, bool]:
+    """True if a key exists in the process env (Docker) or in the agent .env file."""
+    flags = {
+        "openai": bool((os.environ.get("OPENAI_API_KEY") or "").strip()),
+        "telegram": False,
+        "gmail": False,
+    }
+    if agent_id == "leads-beo":
+        flags["telegram"] = bool((os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip())
+        flags["gmail"] = bool((os.environ.get("GMAIL_REFRESH_TOKEN") or "").strip())
+        if (home / "secrets" / "gmail-token.json").is_file():
+            flags["gmail"] = True
+    elif agent_id == "social-beo":
+        flags["telegram"] = bool((os.environ.get("SOCIAL_TELEGRAM_BOT_TOKEN") or "").strip())
     path = home / ".env"
-    flags = {"openai": False, "telegram": False, "gmail": False}
-    secrets = home / "secrets"
-    if (secrets / "gmail-token.json").is_file():
-        flags["gmail"] = True
     if not path.is_file():
         return flags
     try:
@@ -82,6 +101,8 @@ def _env_flags(home: Path) -> dict[str, bool]:
         if key == "OPENAI_API_KEY" and value:
             flags["openai"] = True
         if key == "TELEGRAM_BOT_TOKEN" and value:
+            flags["telegram"] = True
+        if key == "SOCIAL_TELEGRAM_BOT_TOKEN" and value:
             flags["telegram"] = True
         if key == "GMAIL_REFRESH_TOKEN" and value:
             flags["gmail"] = True
@@ -107,10 +128,21 @@ def snapshot(row: dict[str, Any]) -> dict[str, Any]:
     home = _home(row)
     live = str(row.get("status") or "") == "live"
     pid = _read_pid(home) if live else None
-    running = bool(pid and _pid_alive(pid))
-    env = _env_flags(home) if live else {"openai": False, "telegram": False, "gmail": False}
-    publish = str(row.get("publish") or "preview")
     agent_id = str(row.get("id") or "")
+    if not live:
+        running = False
+    elif agent_id == "leads-beo":
+        running = leads_is_on()
+    elif agent_id == "social-beo":
+        running = social_is_running(home)
+    else:
+        running = bool(pid and _pid_alive(pid))
+    env = (
+        _env_flags(home, agent_id)
+        if live
+        else {"openai": False, "telegram": False, "gmail": False}
+    )
+    publish = str(row.get("publish") or "preview")
     if agent_id == "leads-beo":
         connections = [
             {
@@ -176,16 +208,9 @@ def _hermes(row: dict[str, Any], action: str) -> dict[str, Any]:
     if not home.is_dir():
         return {"ok": False, "error": "תיקיית הסוכן חסרה"}
     env_file = home / ".env"
-    if action == "start" and not env_file.is_file():
+    has_env = env_file.is_file() or bool((os.environ.get("OPENAI_API_KEY") or "").strip())
+    if action == "start" and not has_env:
         return {"ok": False, "error": "חסר קובץ .env בתיקיית הסוכן"}
-    if action == "start" and str(row.get("id")) == "leads-beo":
-        # Telegram Q&A is the control API poller. Hermes gateway would duplicate replies.
-        return {
-            "ok": True,
-            "action": "start",
-            "agent": row["id"],
-            "message": "Beo Leads רץ מ-Control. טלגרם לשאלות, Beo OS לאישורים.",
-        }
 
     creation = 0
     if os.name == "nt" and action == "start":
@@ -233,6 +258,18 @@ def start_agent(agent_id: str) -> dict[str, Any]:
     row = agent_by_id(agent_id)
     if not row:
         return {"ok": False, "error": "סוכן לא בקטלוג"}
+    if str(row.get("status")) != "live":
+        return {"ok": False, "error": "הסוכן עדיין לא חי"}
+    if agent_id == "leads-beo":
+        set_leads_on(True)
+        return {"ok": True, "action": "start", "agent": agent_id}
+    if agent_id == "social-beo":
+        probed = docker_container_running(SOCIAL_CONTAINER)
+        if probed is not None:
+            if docker_start(SOCIAL_CONTAINER):
+                return {"ok": True, "action": "start", "agent": agent_id}
+            return {"ok": False, "error": "לא הצלחנו להפעיל את עדי"}
+        return _hermes(row, "start")
     return _hermes(row, "start")
 
 
@@ -240,6 +277,16 @@ def stop_agent(agent_id: str) -> dict[str, Any]:
     row = agent_by_id(agent_id)
     if not row:
         return {"ok": False, "error": "סוכן לא בקטלוג"}
+    if agent_id == "leads-beo":
+        set_leads_on(False)
+        return {"ok": True, "action": "stop", "agent": agent_id}
+    if agent_id == "social-beo":
+        probed = docker_container_running(SOCIAL_CONTAINER)
+        if probed is not None:
+            if docker_stop(SOCIAL_CONTAINER):
+                return {"ok": True, "action": "stop", "agent": agent_id}
+            return {"ok": False, "error": "לא הצלחנו לכבות את עדי"}
+        return _hermes(row, "stop")
     return _hermes(row, "stop")
 
 

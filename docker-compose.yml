@@ -15,12 +15,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-luna}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      SOCIAL_TELEGRAM_BOT_TOKEN: ${SOCIAL_TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
       GMAIL_FROM: ${GMAIL_FROM:-sales@beosystem.com}
-      GMAIL_FROM_NAME: ${GMAIL_FROM_NAME:-שי | Beo Systems}
+      GMAIL_FROM_NAME: ${GMAIL_FROM_NAME:-Shay Beo Systems}
       WHATSAPP_ME_URL: ${WHATSAPP_ME_URL:-https://wa.me/33632519053}
     volumes:
       - leads-home:/opt/beo-agents/agents/leads-beo/home
+      - ./agents/social-beo:/opt/beo-agents/agents/social-beo
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8788:8788"
 

@@ -18,6 +18,7 @@ from typing import Any
 from leads_brief import briefing, end_of_day, pack_for_chat, wants_identity
 from leads_learn import VERTICAL_HE
 from leads_store import _env_value, REPO, pending_today_count, pipeline, today_il
+from power import leads_is_on
 
 CTX = ssl.create_default_context()
 HOME = REPO / "agents" / "leads-beo" / "home" / "telegram"
@@ -571,7 +572,7 @@ def _inbox_loop() -> None:
             from gmail_client import token_present
             from leads_api import ingest_replies
 
-            if token_present():
+            if token_present() and leads_is_on():
                 ingest_replies()
         except Exception:
             _log("inbox scan failed")
@@ -585,6 +586,9 @@ def _loop() -> None:
         token = _token()
         if not token:
             time.sleep(8)
+            continue
+        if not leads_is_on():
+            time.sleep(3)
             continue
         if not commands_set:
             _tg("deleteWebhook")

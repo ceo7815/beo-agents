@@ -130,6 +130,10 @@ def handle_post(path: str, raw: bytes) -> tuple[int, dict[str, Any]]:
     clean = urlparse(path).path.rstrip("/")
     body = _read_json(raw)
     if clean == "/api/leads/run-daily":
+        from power import leads_is_on
+
+        if not leads_is_on():
+            return 200, {"ok": False, "error": "שי כבוי — הפעילו את הסוכן מהלוח"}
         target = int(body.get("target") or 10)
         target = min(max(target, 1), 10)
         return 200, run_daily(target=target)

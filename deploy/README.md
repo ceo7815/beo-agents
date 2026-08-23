@@ -27,3 +27,5 @@ Enable push-to-deploy (webhook).
 | `WHATSAPP_ME_URL` | `https://wa.me/33632519053` |
 
 Then Deploy. Beo OS should proxy `/api/beo-agents` to `http://127.0.0.1:8788`.
+
+The control container mounts Docker (`/var/run/docker.sock`) so Beo OS can start/stop עדי (`beo-social`) without a Hermes gateway button. שי is on/off inside control (Telegram poller), not a separate gateway.
