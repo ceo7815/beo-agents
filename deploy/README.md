@@ -1,22 +1,29 @@
-# Deploy Beo Agents on beo-systems-1
+# xCloud — Deploy via Git (same flow as Beo OS / Titatu)
 
-Private repo only: `github.com/ceo7815/beo-agents`. Never ceo-digital or Hub.
-Do not merge into Titatu / Mochka / Hub agent folders.
+On `beo-systems-1` → **+ New Site** → **Deploy Any App From Git**:
 
-## On the server
+1. Click **Private Repository** (not Public).
+2. Select **`ceo7815/beo-agents`** — never `ceo-digital/*`, never `titatu-agents`.
+3. Branch: `main`
+4. Deploy with **docker-compose.yml**
+5. Docker Compose file: `docker-compose.yml`
+6. Port: **8788**
+7. Site name: `Beo-agents`
+8. Domain when ready: `agents.beosystem.com` (or xCloud preview until DNS)
 
-```bash
-cd /opt   # or the Cloud site folder you choose — not Titatu.agents
-git clone https://github.com/ceo7815/beo-agents.git
-cd beo-agents
-cp agents/leads-beo/.env.example agents/leads-beo/.env
-cp agents/social-beo/.env.example agents/social-beo/.env
-# fill both .env files on the server (never commit them)
-# copy Gmail secrets into agents/leads-beo/secrets/ if sending mail
-docker compose up -d --build
-docker compose logs -f control
-```
+Enable push-to-deploy (webhook).
 
-Control API listens on `127.0.0.1:8788` on the host. Beo OS (`os.beosystem.com`) should proxy `/api/beo-agents` there.
+## Environment (xCloud → Environment)
 
-Containers: `beo-control` (שי / Telegram / pipeline), `beo-social` (עדי / Hermes).
+| Key | Value |
+| --- | --- |
+| `OPENAI_API_KEY` | same Beo key |
+| `OPENAI_MODEL` | `gpt-5.6-luna` |
+| `TELEGRAM_BOT_TOKEN` | שי / Beo Leads bot |
+| `SOCIAL_TELEGRAM_BOT_TOKEN` | עדי / Beo Social bot |
+| `TELEGRAM_ALLOWED_USERS` | Or's Telegram id |
+| `GMAIL_FROM` | `sales@beosystem.com` |
+| `GMAIL_FROM_NAME` | `שי \| Beo Systems` |
+| `WHATSAPP_ME_URL` | `https://wa.me/33632519053` |
+
+Then Deploy. Beo OS should proxy `/api/beo-agents` to `http://127.0.0.1:8788`.

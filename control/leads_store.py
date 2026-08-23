@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -197,6 +198,9 @@ def _env_path() -> Path:
 
 
 def _env_value(key: str) -> str:
+    from_env = (os.environ.get(key) or "").strip().strip('"').strip("'")
+    if from_env:
+        return from_env
     path = _env_path()
     if not path.is_file():
         return ""
