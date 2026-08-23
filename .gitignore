@@ -3,6 +3,9 @@
 !.env.example
 !**/.env.example
 
+# Old bind-mount leftover on the server — git must never checkout here again
+/agents/social-beo/
+
 # Hermes runtime (per-agent volume)
 agents/*/sessions/
 agents/*/logs/

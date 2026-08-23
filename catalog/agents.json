@@ -10,7 +10,7 @@
       "role": "סושיאל ורשתות",
       "purpose": "עדי. מנהלת סושיאל ורשתות חברתיות — אינסטגרם ופייסבוק. מדברים בטלגרם.",
       "status": "live",
-      "folder": "agents/social-beo",
+      "folder": "bundled/social-beo",
       "hermes_profile": "social-beo",
       "channels": ["telegram"],
       "platforms": ["instagram", "facebook"],

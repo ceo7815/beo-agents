@@ -88,7 +88,7 @@ Beo-agents/
 
   dashboard/             ← Beo Agents UI
 
-  agents/social-beo/     ← Hermes home for Beo Social
+  bundled/social-beo/    ← Beo Social source (built into the image)
   agents/leads-beo/      ← שי / Beo Leads (pipeline + drafts)
 
   docker-compose.yml     ← server, after local works

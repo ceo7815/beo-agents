@@ -28,4 +28,4 @@ Enable push-to-deploy (webhook).
 
 Then Deploy. Beo OS should proxy `/api/beo-agents` to `http://127.0.0.1:8788`.
 
-Hermes for עדי is built from git into the image (`deploy/Dockerfile.social`). Runtime writes go to the Docker volume `social-home`, never into the git checkout. Push to `main` is enough for the next deploys.
+Hermes for עדי is built from `bundled/social-beo` into the image. Runtime writes go to the Docker volume `social-home`. The old path `agents/social-beo` is not in git (it was a bind-mount leftover that blocked `git pull`).
