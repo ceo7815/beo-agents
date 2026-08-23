@@ -1,0 +1,51 @@
+model:
+  default: gpt-5.6-terra
+  provider: openai-api
+image_gen:
+  provider: openai
+  model: gpt-image-2-medium
+terminal:
+  backend: local
+  cwd: home
+agent:
+  max_turns: 28
+  reasoning_effort: none
+tool_loop_guardrails:
+  hard_stop_enabled: true
+  hard_stop_after:
+    exact_failure: 5
+    idempotent_no_progress: 5
+plugins:
+  enabled:
+  - social-beo
+platforms:
+  telegram:
+    reply_to_mode: first
+
+platform_toolsets:
+  telegram:
+    - social-beo
+    - web
+    - memory
+    - session_search
+    - skills
+    - clarify
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  write_approval: false
+unauthorized_dm_behavior: ignore
+session_reset:
+  mode: both
+  idle_minutes: 240
+  at_hour: 4
+onboarding:
+  profile_build: off
+  seen:
+    profile_build_offered: true
+display:
+  platforms:
+    telegram:
+      tool_progress: off
+      interim_assistant_messages: true
+      long_running_notifications: true

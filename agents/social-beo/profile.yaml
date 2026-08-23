@@ -1,0 +1,26 @@
+id: social-beo
+handle: social.beo
+display_name: Beo Social
+persona: עדי
+owner: Beo Systems
+owner_person: אור
+role: ceo
+website: https://beosystem.com
+version: 1
+purpose: Social and networks manager for Beo Systems. Instagram, Facebook, Telegram with Or.
+
+channels:
+  v1: [telegram]
+  later: [whatsapp]
+
+content_platforms:
+  v1: [instagram, facebook]
+  later: [tiktok]
+
+publish:
+  v1: telegram_preview_only
+  later: meta_graph_api
+
+learning:
+  v1: or_reports_results_in_telegram
+  later: platform_insights_api

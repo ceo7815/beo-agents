@@ -1,0 +1,39 @@
+{
+  "updated_at": "2026-08-20T19:53:13.952257",
+  "platforms": {
+    "telegram": [
+      {
+        "id": "8818011584",
+        "name": "Or Nov",
+        "type": "dm",
+        "thread_id": null
+      }
+    ],
+    "discord": [],
+    "whatsapp": [],
+    "whatsapp_cloud": [],
+    "slack": [],
+    "signal": [],
+    "mattermost": [],
+    "matrix": [],
+    "homeassistant": [],
+    "email": [],
+    "sms": [],
+    "dingtalk": [],
+    "msgraph_webhook": [],
+    "feishu": [],
+    "wecom": [],
+    "wecom_callback": [],
+    "weixin": [],
+    "bluebubbles": [],
+    "qqbot": [],
+    "yuanbao": [],
+    "google_chat": [],
+    "irc": [],
+    "line": [],
+    "ntfy": [],
+    "photon": [],
+    "simplex": [],
+    "teams": []
+  }
+}

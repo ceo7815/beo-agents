@@ -1,0 +1,30 @@
+# One service = one process. Do not share env files with Titatu / other agents.
+name: beo-agents
+
+services:
+  control:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: beo-control
+    restart: unless-stopped
+    working_dir: /opt/beo-agents
+    volumes:
+      - .:/opt/beo-agents
+    environment:
+      BEO_CONTROL_HOST: "0.0.0.0"
+      BEO_CONTROL_PORT: "8788"
+    ports:
+      - "127.0.0.1:8788:8788"
+
+  social-beo:
+    image: nousresearch/hermes-agent:latest
+    container_name: beo-social
+    restart: unless-stopped
+    command: ["gateway", "run"]
+    volumes:
+      - ./agents/social-beo:/opt/data
+    environment:
+      HERMES_UID: ${HERMES_UID:-1000}
+      HERMES_GID: ${HERMES_GID:-1000}
+    # Telegram uses outbound polling. Do not publish 8642/9119.

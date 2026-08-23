@@ -1,0 +1,14 @@
+name: leads-beo
+version: 1.0.0
+description: "Beo Leads — שי, Israeli outreach agent for Beo Systems"
+hermes_requires: ">=0.16.0"
+author: "Beo Systems"
+license: "UNLICENSED"
+
+env_requires:
+  - name: OPENAI_API_KEY
+    description: "Beo Systems OpenAI key (gpt-5.6-luna)"
+    required: true
+  - name: TELEGRAM_BOT_TOKEN
+    description: "Dedicated Telegram bot — later. Not Social's token."
+    required: false

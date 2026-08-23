@@ -1,0 +1,17 @@
+id: leads-beo
+handle: leads.beo
+display_name: Beo Leads
+persona: שי
+owner: Beo Systems
+owner_person: אור
+role: ceo
+website: https://beosystem.com
+version: 1
+purpose: Israeli lead outreach for Beo Systems. Public-site emails only. Beo OS is the control center.
+
+channels:
+  v1: [beo_os, telegram]
+
+email:
+  v1: drafts_in_beo_os
+  later: gmail_api_send

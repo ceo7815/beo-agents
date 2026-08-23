@@ -1,0 +1,12 @@
+name: social-beo
+version: 1.0.0
+description: Instagram/Facebook specs, draft archive, and performance learning for Beo Social
+author: Beo Systems
+kind: standalone
+provides_tools:
+  - get_brand_assets
+  - get_platform_specs
+  - make_beo_visual
+  - save_social_pack
+  - record_performance
+  - performance_insights

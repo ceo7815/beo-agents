@@ -1,0 +1,17 @@
+name: social-beo
+version: 1.0.0
+description: "Beo Social — Instagram and Facebook content agent for Beo Systems"
+hermes_requires: ">=0.16.0"
+author: "Beo Systems"
+license: "UNLICENSED"
+
+env_requires:
+  - name: OPENAI_API_KEY
+    description: "Beo Systems OpenAI key (text + gpt-image-2)"
+    required: true
+  - name: TELEGRAM_BOT_TOKEN
+    description: "Telegram bot token for Beo Social only — never reuse another agent's bot"
+    required: true
+  - name: TELEGRAM_ALLOWED_USERS
+    description: "Numeric Telegram user id of Or. Get it from @userinfobot"
+    required: true

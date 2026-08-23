@@ -1,0 +1,9 @@
+name: leads-beo
+version: 1.0.0
+description: Pipeline tools for Beo Leads (שי) — public-site emails only
+author: Beo Systems
+kind: standalone
+provides_tools:
+  - leads_overview
+  - leads_pipeline
+  - record_lead_candidate

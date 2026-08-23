@@ -1,0 +1,35 @@
+{
+  "company": "Beo Systems",
+  "line": "מבינים תוכנה. מבינים AI.",
+  "site": "https://beosystem.com",
+  "agents": [
+    {
+      "id": "social-beo",
+      "handle": "social.beo",
+      "display_name": "Beo Social",
+      "role": "סושיאל ורשתות",
+      "purpose": "עדי. מנהלת סושיאל ורשתות חברתיות — אינסטגרם ופייסבוק. מדברים בטלגרם.",
+      "status": "live",
+      "folder": "agents/social-beo",
+      "hermes_profile": "social-beo",
+      "channels": ["telegram"],
+      "platforms": ["instagram", "facebook"],
+      "publish": "preview",
+      "owner": "אור"
+    },
+    {
+      "id": "leads-beo",
+      "handle": "leads.beo",
+      "display_name": "Beo Leads",
+      "role": "גיוס לידים",
+      "purpose": "שי. איתור עסקים בישראל עם מייל מהאתר, טיוטות לאישור ב-Beo OS, בלי follow-up.",
+      "status": "live",
+      "folder": "agents/leads-beo",
+      "hermes_profile": "leads-beo",
+      "channels": ["beo_os", "telegram"],
+      "platforms": ["gmail"],
+      "publish": "approval",
+      "owner": "אור"
+    }
+  ]
+}
