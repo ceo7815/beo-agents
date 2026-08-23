@@ -33,7 +33,6 @@ agents/*/home/pipeline/*.json
 agents/*/home/pipeline/*.tmp
 !agents/*/home/pipeline/.gitkeep
 agents/*/home/telegram/**
-agents/*/home/power.json
 agents/*/home/learning/**
 !agents/*/home/learning/.gitkeep
 agents/*/home/memories/**

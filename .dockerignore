@@ -12,6 +12,13 @@ agents/*/home/telegram/**
 agents/*/home/learning/**
 agents/*/secrets/**
 !agents/*/secrets/.gitkeep
+agents/*/logs/
+agents/*/sessions/
+agents/*/cache/
+agents/*/auth.json
+agents/*/auth.lock
+agents/*/gateway_state.json
+agents/*/models_dev_cache.json
 *.log
 .venv/
 venv/

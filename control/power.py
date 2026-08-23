@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
-LEADS_POWER = REPO / "agents" / "leads-beo" / "home" / "power.json"
+LEADS_POWER = REPO / "agents" / "leads-beo" / "home" / "telegram" / "power.json"
 DOCKER_SOCK = os.environ.get("DOCKER_SOCK", "/var/run/docker.sock")
 SOCIAL_CONTAINER = os.environ.get("BEO_SOCIAL_CONTAINER", "beo-social")
 
