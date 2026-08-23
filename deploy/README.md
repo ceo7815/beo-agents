@@ -29,3 +29,17 @@ Enable push-to-deploy (webhook).
 Then Deploy. Beo OS should proxy `/api/beo-agents` to `http://127.0.0.1:8788`.
 
 The control container mounts Docker (`/var/run/docker.sock`) so Beo OS can start/stop עדי (`beo-social`) without a Hermes gateway button. שי is on/off inside control (Telegram poller), not a separate gateway.
+
+Adi's Hermes home is the named volume `social-home`, not the git folder. `agents/social-beo` is mounted read-only so `git pull` is not blocked by container file ownership.
+
+If a Git deploy fails with `Permission denied` on `agents/social-beo` or a dirty `.gitignore`, open the site terminal, stop containers, give the deploy user the tree back, then pull:
+
+```bash
+docker stop beo-social beo-control || true
+chown -R "$(whoami)" .
+chmod -R u+rwX agents/social-beo .gitignore 2>/dev/null || true
+git checkout -- .gitignore
+git reset --hard origin/main
+```
+
+Then click Deploy again.

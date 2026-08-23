@@ -22,7 +22,6 @@ services:
       WHATSAPP_ME_URL: ${WHATSAPP_ME_URL:-https://wa.me/33632519053}
     volumes:
       - leads-home:/opt/beo-agents/agents/leads-beo/home
-      - ./agents/social-beo:/opt/beo-agents/agents/social-beo
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8788:8788"
@@ -31,9 +30,11 @@ services:
     image: nousresearch/hermes-agent:latest
     container_name: beo-social
     restart: unless-stopped
-    command: ["gateway", "run"]
+    entrypoint: ["/bin/sh", "/opt/social-entrypoint.sh"]
     volumes:
-      - ./agents/social-beo:/opt/data
+      - ./agents/social-beo:/opt/beo-src:ro
+      - ./deploy/social-entrypoint.sh:/opt/social-entrypoint.sh:ro
+      - social-home:/opt/data
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TELEGRAM_BOT_TOKEN: ${SOCIAL_TELEGRAM_BOT_TOKEN:-}
@@ -43,3 +44,4 @@ services:
 
 volumes:
   leads-home:
+  social-home:
