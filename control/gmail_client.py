@@ -155,6 +155,47 @@ def _strip_html(html: str) -> str:
     return html_mod.unescape(text).strip()
 
 
+def _constrain_signature_html(html: str) -> str:
+    """Email clients ignore outer CSS — shrink banner images to signature size."""
+    html = html or ""
+
+    def _img(match: re.Match[str]) -> str:
+        inner = match.group(0)[4:].rstrip()
+        if inner.endswith("/>"):
+            inner = inner[:-2]
+        elif inner.endswith(">"):
+            inner = inner[:-1]
+        rest = re.sub(
+            r"\s(width|height)\s*=\s*(\"[^\"]*\"|'[^']*'|\S+)",
+            "",
+            inner,
+            flags=re.I,
+        )
+        style = (
+            "max-width:480px;width:100%;height:auto;max-height:88px;"
+            "display:block;border:0;outline:none;"
+        )
+        if re.search(r"\bstyle\s*=", rest, re.I):
+            rest = re.sub(
+                r"\bstyle\s*=\s*(\"|')(.*?)\1",
+                lambda s: f"style={s.group(1)}{s.group(2)};{style}{s.group(1)}",
+                rest,
+                count=1,
+                flags=re.I | re.S,
+            )
+        else:
+            rest = f' style="{style}"{rest}'
+        return f"<img{rest}>"
+
+    html = re.sub(r"<img\b[^>]*>", _img, html, flags=re.I | re.S)
+    return (
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+        'width="480" style="max-width:480px;width:100%;border-collapse:collapse;">'
+        '<tr><td style="max-width:480px;line-height:0;font-size:0;">'
+        f"{html}</td></tr></table>"
+    )
+
+
 def _send_as_signature(service: Any, from_email: str) -> str:
     """Gmail UI signatures are not added to API mail unless we append them."""
     mailbox = (from_email or "").strip()
@@ -168,7 +209,7 @@ def _send_as_signature(service: Any, from_email: str) -> str:
         )
         html = str(data.get("signature") or "").strip()
         if html:
-            return html
+            return _constrain_signature_html(html)
     except Exception:
         pass
     try:
@@ -180,11 +221,11 @@ def _send_as_signature(service: Any, from_email: str) -> str:
                 or row.get("isDefault")
                 or row.get("isPrimary")
             ):
-                return html
+                return _constrain_signature_html(html)
         for row in listing.get("sendAs") or []:
             html = str(row.get("signature") or "").strip()
             if html:
-                return html
+                return _constrain_signature_html(html)
     except Exception:
         return ""
     return ""
@@ -261,8 +302,48 @@ def _extract_addr(from_raw: str) -> str:
     return ((m.group(1) if m else from_raw) or "").strip().lower()
 
 
-def _classify_reply(subject: str, snippet: str) -> str:
-    blob = f"{subject} {snippet}".lower()
+def _classify_reply(subject: str, snippet: str, from_email: str = "") -> str:
+    frm = (from_email or "").lower()
+    blob = f"{frm} {subject} {snippet}".lower()
+    bounce_from = (
+        "mailer-daemon",
+        "postmaster@",
+        "mail-daemon",
+        "nobody@",
+        "bounce@",
+        "delivery-status",
+    )
+    if any(x in frm for x in bounce_from):
+        return "bounced"
+    if any(
+        m in blob
+        for m in (
+            "undeliverable",
+            "undelivered",
+            "delivery status",
+            "delivery failure",
+            "failure notice",
+            "returned to sender",
+            "address not found",
+            "user unknown",
+            "mailbox not found",
+            "doesn't exist",
+            "does not exist",
+            "recipient address rejected",
+            "550 5.1.1",
+            "5.1.1",
+            "לא ניתן למסור",
+            "נמען לא נמצא",
+            "הכתובת לא קיימת",
+            "כתובת שגויה",
+            "כתובת לא נכונה",
+            "מצב מסירה",
+            "הודעת מצב מסירה",
+            "mail delivery subsystem",
+            "delivery status notification",
+        )
+    ):
+        return "bounced"
     if any(
         m in blob
         for m in (
@@ -350,7 +431,9 @@ def find_inbox_replies(sent_by_email: dict[str, dict[str, Any]]) -> list[dict[st
         hits.append(
             {
                 "item_id": item_id,
-                "reply_kind": _classify_reply(headers.get("subject") or "", snippet),
+                "reply_kind": _classify_reply(
+                    headers.get("subject") or "", snippet, from_email
+                ),
                 "reply_preview": snippet,
                 "gmail_thread_id": thread_id,
             }

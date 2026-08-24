@@ -187,6 +187,8 @@ def _outcome(row: dict[str, Any]) -> str | None:
     kind = str(row.get("reply_kind") or "")
     if status == "rejected":
         return "or_rejected"
+    if status == "bounced":
+        return "closed"
     if status == "replied" and kind == "not_interested":
         return "not_interested"
     if status == "replied":

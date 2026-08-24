@@ -293,7 +293,7 @@ def notify_inbox_reply(row: dict[str, Any] | None, kind: str) -> None:
     preview = str(row.get("reply_preview") or "").strip()
     if kind == "human":
         lines = [
-            "ענו.",
+            "ענו — תשובה אנושית.",
             "",
             company,
             email,
@@ -303,13 +303,24 @@ def notify_inbox_reply(row: dict[str, Any] | None, kind: str) -> None:
             lines += ["", why]
         if preview:
             lines += ["", "הם כתבו:", preview]
-        lines += ["", "הליד נפתח ב-Beo OS."]
+        lines += ["", "זה ליד. הכרטיס יופיע בדף לידים ב-Beo OS."]
     elif kind == "not_interested":
         lines = [
             "ענו — לא מעוניינים.",
             "",
             company,
             email,
+        ]
+        if preview:
+            lines += ["", preview]
+    elif kind == "bounced":
+        lines = [
+            "כתובת לא נכונה — המייל חזר.",
+            "",
+            company,
+            email,
+            "",
+            "זה לא ליד. עדכנתי בצינור שהכתובת שגויה.",
         ]
         if preview:
             lines += ["", preview]
@@ -526,6 +537,7 @@ def _today_text() -> str:
         f"נשלחו היום: {ov.get('sent_today') or 0}",
         f"מחכים לתשובה: {len(waiting)}",
         f"ענו: {len(replied)}",
+        f"כתובת לא נכונה: {len(pack.get('all_bounced') or [])}",
         f"לא חזרו (נסגרו): {ov.get('closed_no_reply') or 0}",
     ]
     if pending:

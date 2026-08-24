@@ -37,19 +37,36 @@ def _notify_reply(item_id: str, kind: str) -> None:
         pass
 
 
+def _pending_os_lead_rows() -> list[dict[str, Any]]:
+    """Human replies that still need a CRM card on the Leads page."""
+    items: list[dict[str, Any]] = []
+    for row in pipeline("replied").get("items") or []:
+        if row.get("os_lead_created"):
+            continue
+        kind = str(row.get("reply_kind") or "human")
+        if kind in {"not_interested", "ooo", "bounced"}:
+            continue
+        items.append(row)
+    return items
+
+
 def ingest_replies() -> dict[str, Any]:
     if not token_present():
         return {"ok": False, "error": "Gmail לא מחובר"}
-    rows = [r for r in pipeline("sent").get("items") or [] if r.get("email")]
-    mapping = {str(r.get("email") or "").strip().lower(): r for r in rows}
+    watch = [
+        r
+        for r in (pipeline("sent").get("items") or []) + (pipeline("replied").get("items") or [])
+        if r.get("email")
+    ]
+    mapping = {str(r.get("email") or "").strip().lower(): r for r in watch}
     hits = find_inbox_replies(mapping)
-    human = 0
     ooo = 0
     not_interested = 0
+    bounced = 0
     new_ids: list[str] = []
     for hit in hits:
         row = get_item(hit["item_id"])
-        if not row or row.get("status") != "sent":
+        if not row:
             continue
         kind = hit["reply_kind"]
         extra: dict[str, Any] = {
@@ -58,6 +75,16 @@ def ingest_replies() -> dict[str, Any]:
             "gmail_thread_id": hit.get("gmail_thread_id") or row.get("gmail_thread_id"),
             "updated_at": _now(),
         }
+        status = str(row.get("status") or "")
+        if kind == "bounced" and status in {"sent", "replied"}:
+            extra["bounced_at"] = _now()
+            extra["status_note"] = "כתובת לא נכונה — לא ליד"
+            set_status(hit["item_id"], "bounced", extra)
+            bounced += 1
+            _notify_reply(hit["item_id"], "bounced")
+            continue
+        if status != "sent":
+            continue
         if kind == "ooo":
             extra["ooo_at"] = _now()
             extra["status_note"] = "מענה אוטומטי — מחכים לתשובה אנושית"
@@ -72,20 +99,21 @@ def ingest_replies() -> dict[str, Any]:
             not_interested += 1
             _notify_reply(hit["item_id"], "not_interested")
             continue
-        extra["status_note"] = "תשובה אנושית — ליד ב-Beo OS"
+        extra["status_note"] = "תשובה אנושית — כרטיס בדף לידים"
         set_status(hit["item_id"], "replied", extra)
-        human += 1
         new_ids.append(hit["item_id"])
         _notify_reply(hit["item_id"], "human")
+    os_items = _pending_os_lead_rows()
     out = {
         "ok": True,
-        "human": human,
+        "human": len(os_items),
         "ooo": ooo,
         "not_interested": not_interested,
+        "bounced": bounced,
         "new_item_ids": new_ids,
-        "items": [get_item(i) for i in new_ids if get_item(i)],
+        "items": os_items,
     }
-    _learn_quiet(with_llm=human > 0)
+    _learn_quiet(with_llm=bool(new_ids))
     return out
 
 

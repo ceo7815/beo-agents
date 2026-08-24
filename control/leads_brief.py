@@ -148,6 +148,7 @@ def briefing() -> dict[str, Any]:
         "month_replied": pick("replied", start=f"{month}-01", end=day),
         "waiting_for_reply": pick("sent"),
         "all_replied": pick("replied"),
+        "all_bounced": pick("bounced"),
         "closed_no_reply": pick("closed_no_reply"),
         "pending_all": pick("pending_approval"),
         "rejected": pick("rejected"),

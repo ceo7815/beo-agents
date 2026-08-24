@@ -24,6 +24,7 @@ STATUSES = (
     "approved",
     "sent",
     "replied",
+    "bounced",
     "closed_no_reply",
 )
 
@@ -37,6 +38,7 @@ STATUS_HE = {
     "approved": "אושר · ממתין ל-Gmail",
     "sent": "נשלח",
     "replied": "נענה → ליד",
+    "bounced": "כתובת לא נכונה",
     "closed_no_reply": "לא ענו → סגור",
 }
 
@@ -168,6 +170,7 @@ def overview() -> dict[str, Any]:
         "pending_today": count("pending_approval", today=True),
         "sent_today": count("sent", today=True),
         "replied": count("replied"),
+        "bounced": count("bounced"),
         "closed_no_reply": count("closed_no_reply"),
         "gmail_connected": gmail_connected(),
         "gmail_oauth_file": gmail_oauth_present(),
