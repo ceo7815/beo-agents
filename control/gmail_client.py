@@ -18,6 +18,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.settings.basic",
 ]
 
 
@@ -147,6 +148,48 @@ def body_to_html(body: str) -> str:
     )
 
 
+def _strip_html(html: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", html or "", flags=re.I)
+    text = re.sub(r"</p>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    return html_mod.unescape(text).strip()
+
+
+def _send_as_signature(service: Any, from_email: str) -> str:
+    """Gmail UI signatures are not added to API mail unless we append them."""
+    mailbox = (from_email or "").strip()
+    try:
+        data = (
+            service.users()
+            .settings()
+            .sendAs()
+            .get(userId="me", sendAsEmail=mailbox)
+            .execute()
+        )
+        html = str(data.get("signature") or "").strip()
+        if html:
+            return html
+    except Exception:
+        pass
+    try:
+        listing = service.users().settings().sendAs().list(userId="me").execute()
+        for row in listing.get("sendAs") or []:
+            html = str(row.get("signature") or "").strip()
+            if html and (
+                str(row.get("sendAsEmail") or "").lower() == mailbox.lower()
+                or row.get("isDefault")
+                or row.get("isPrimary")
+            ):
+                return html
+        for row in listing.get("sendAs") or []:
+            html = str(row.get("signature") or "").strip()
+            if html:
+                return html
+    except Exception:
+        return ""
+    return ""
+
+
 def send_mail(
     *,
     to_email: str,
@@ -169,15 +212,33 @@ def send_mail(
     except ImportError:
         return {"ok": False, "error": "חסר google-api-python-client"}
 
+    try:
+        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:400]}
+
+    signature_html = _send_as_signature(service, from_email)
+    html = body_to_html(body or "")
+    text = body or ""
+    if signature_html:
+        html = (
+            f"{html}"
+            '<div style="margin-top:24px;padding-top:12px;'
+            'border-top:1px solid #e8eaed">'
+            f"{signature_html}</div>"
+        )
+        sig_text = _strip_html(signature_html)
+        if sig_text:
+            text = f"{text.rstrip()}\n\n{sig_text}"
+
     msg = EmailMessage()
     msg["To"] = to_email
     msg["From"] = f"{from_name} <{from_email}>"
     msg["Subject"] = subject or "(ללא נושא)"
-    msg.set_content(body or "", charset="utf-8")
-    msg.add_alternative(body_to_html(body or ""), subtype="html", charset="utf-8")
+    msg.set_content(text, charset="utf-8")
+    msg.add_alternative(html, subtype="html", charset="utf-8")
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
     try:
-        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         sent = (
             service.users()
             .messages()
