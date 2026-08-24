@@ -54,51 +54,57 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path.rstrip("/") or "/"
-        if path in {"/", "/api/health"}:
-            _json(
-                self,
-                200,
-                {
-                    "ok": True,
-                    "service": "beo-agents-control",
-                    "daily_research": "server",
-                },
-            )
-            return
-        if path == "/api/fleet":
-            _json(self, 200, fleet())
-            return
-        if path.startswith("/api/leads"):
-            code, payload = leads_api.handle_get(self.path)
-            _json(self, code, payload)
-            return
-        if path.startswith("/api/agents/"):
-            agent_id = path.split("/")[-1]
-            row = agent_by_id(agent_id)
-            if not row:
-                _json(self, 404, {"ok": False, "error": "סוכן לא בקטלוג"})
+        try:
+            path = urlparse(self.path).path.rstrip("/") or "/"
+            if path in {"/", "/api/health"}:
+                _json(
+                    self,
+                    200,
+                    {
+                        "ok": True,
+                        "service": "beo-agents-control",
+                        "daily_research": "server",
+                    },
+                )
                 return
-            _json(self, 200, snapshot(row))
-            return
-        _json(self, 404, {"ok": False, "error": "not found"})
+            if path == "/api/fleet":
+                _json(self, 200, fleet())
+                return
+            if path.startswith("/api/leads"):
+                code, payload = leads_api.handle_get(self.path)
+                _json(self, code, payload)
+                return
+            if path.startswith("/api/agents/"):
+                agent_id = path.split("/")[-1]
+                row = agent_by_id(agent_id)
+                if not row:
+                    _json(self, 404, {"ok": False, "error": "סוכן לא בקטלוג"})
+                    return
+                _json(self, 200, snapshot(row))
+                return
+            _json(self, 404, {"ok": False, "error": "not found"})
+        except Exception as exc:
+            _json(self, 500, {"ok": False, "error": str(exc)[:400]})
 
     def do_POST(self) -> None:
-        path = urlparse(self.path).path.rstrip("/")
-        if path.startswith("/api/leads"):
-            code, payload = leads_api.handle_post(self.path, _body(self))
-            _json(self, code, payload)
-            return
-        parts = path.split("/")
-        if len(parts) == 5 and parts[1] == "api" and parts[2] == "agents":
-            agent_id, action = parts[3], parts[4]
-            if action == "start":
-                _json(self, 200, start_agent(agent_id))
+        try:
+            path = urlparse(self.path).path.rstrip("/")
+            if path.startswith("/api/leads"):
+                code, payload = leads_api.handle_post(self.path, _body(self))
+                _json(self, code, payload)
                 return
-            if action == "stop":
-                _json(self, 200, stop_agent(agent_id))
-                return
-        _json(self, 404, {"ok": False, "error": "not found"})
+            parts = path.split("/")
+            if len(parts) == 5 and parts[1] == "api" and parts[2] == "agents":
+                agent_id, action = parts[3], parts[4]
+                if action == "start":
+                    _json(self, 200, start_agent(agent_id))
+                    return
+                if action == "stop":
+                    _json(self, 200, stop_agent(agent_id))
+                    return
+            _json(self, 404, {"ok": False, "error": "not found"})
+        except Exception as exc:
+            _json(self, 500, {"ok": False, "error": str(exc)[:400]})
 
 
 def main() -> None:

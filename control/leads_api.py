@@ -127,6 +127,76 @@ def _read_json(raw: bytes) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _approve_item(item_id: str, row: dict[str, Any], body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """Leave the approval queue first, then send. Safe to retry."""
+    if row.get("gmail_id"):
+        result = set_status(
+            item_id,
+            "sent",
+            {"status_note": "נשלח מ-sales@beosystem.com", "updated_at": _now()},
+        )
+        return (200, result) if result.get("ok") else (400, result)
+    status = str(row.get("status") or "")
+    if status not in {"pending_approval", "approved"}:
+        return 400, {"ok": False, "error": "הפריט כבר לא ממתין לאישור"}
+
+    extra: dict[str, Any] = {"approved_at": _now(), "updated_at": _now()}
+    if "email_subject" in body:
+        extra["email_subject"] = str(body.get("email_subject") or "")
+    if "email_body" in body:
+        extra["email_body"] = str(body.get("email_body") or "")
+    subject = str(extra.get("email_subject") or row.get("email_subject") or "")
+    mail_body = str(extra.get("email_body") or row.get("email_body") or "")
+    extra["status_note"] = "אושר · שולח מ-Gmail…"
+    parked = set_status(item_id, "approved", extra)
+    if not parked.get("ok"):
+        return 400, parked
+
+    if not gmail_connected():
+        extra["status_note"] = "אושר. חסר חיבור Gmail — הרץ scripts/connect-gmail.ps1"
+        result = set_status(item_id, "approved", extra)
+        return (200, result) if result.get("ok") else (400, result)
+
+    try:
+        sent = send_mail(
+            to_email=str(row.get("email") or ""),
+            subject=subject,
+            body=mail_body,
+            from_email=str(row.get("from_email") or "sales@beosystem.com"),
+            from_name=str(row.get("from_name") or "שי | Beo Systems"),
+        )
+    except Exception as exc:
+        extra["status_note"] = str(exc)[:400]
+        set_status(item_id, "pending_approval", extra)
+        return 400, {"ok": False, "error": extra["status_note"]}
+
+    if not sent.get("ok"):
+        extra["status_note"] = str(sent.get("error") or "שליחה נכשלה")
+        result = set_status(item_id, "pending_approval", extra)
+        return 400, {
+            "ok": False,
+            "error": extra["status_note"],
+            "item": result.get("item"),
+        }
+    extra["sent_at"] = _now()
+    extra["gmail_id"] = sent.get("gmail_id")
+    extra["gmail_thread_id"] = sent.get("gmail_thread_id")
+    extra["status_note"] = "נשלח מ-sales@beosystem.com"
+    extra["vertical_key"] = row.get("vertical_key") or infer_vertical(row)
+    extra["copy_features"] = extract_copy_features(
+        subject=subject,
+        body=mail_body,
+        owner=str(row.get("owner_name") or ""),
+        subject_b=str(row.get("email_subject_b") or ""),
+        service=str(row.get("service") or ""),
+        vertical_key=str(extra["vertical_key"] or ""),
+        draft_source=str(row.get("draft_source") or ""),
+    )
+    result = set_status(item_id, "sent", extra)
+    _learn_quiet(with_llm=False)
+    return (200, result) if result.get("ok") else (400, result)
+
+
 def handle_get(path: str) -> tuple[int, dict[str, Any]]:
     parsed = urlparse(path)
     clean = parsed.path.rstrip("/") or "/"
@@ -184,49 +254,10 @@ def handle_post(path: str, raw: bytes) -> tuple[int, dict[str, Any]]:
         if not row:
             return 404, {"ok": False, "error": "פריט לא נמצא"}
         if action == "approve":
-            extra = {"approved_at": _now(), "updated_at": _now()}
-            if "email_subject" in body:
-                extra["email_subject"] = str(body.get("email_subject") or "")
-            if "email_body" in body:
-                extra["email_body"] = str(body.get("email_body") or "")
-            subject = str(extra.get("email_subject") or row.get("email_subject") or "")
-            mail_body = str(extra.get("email_body") or row.get("email_body") or "")
-            if not gmail_connected():
-                extra["status_note"] = "אושר. חסר חיבור Gmail — הרץ scripts/connect-gmail.ps1"
-                result = set_status(item_id, "approved", extra)
-                return (200, result) if result.get("ok") else (400, result)
-            sent = send_mail(
-                to_email=str(row.get("email") or ""),
-                subject=subject,
-                body=mail_body,
-                from_email=str(row.get("from_email") or "sales@beosystem.com"),
-                from_name=str(row.get("from_name") or "שי | Beo Systems"),
-            )
-            if not sent.get("ok"):
-                extra["status_note"] = str(sent.get("error") or "שליחה נכשלה")
-                result = set_status(item_id, "approved", extra)
-                return 400, {
-                    "ok": False,
-                    "error": extra["status_note"],
-                    "item": result.get("item"),
-                }
-            extra["sent_at"] = _now()
-            extra["gmail_id"] = sent.get("gmail_id")
-            extra["gmail_thread_id"] = sent.get("gmail_thread_id")
-            extra["status_note"] = "נשלח מ-sales@beosystem.com"
-            extra["vertical_key"] = row.get("vertical_key") or infer_vertical(row)
-            extra["copy_features"] = extract_copy_features(
-                subject=subject,
-                body=mail_body,
-                owner=str(row.get("owner_name") or ""),
-                subject_b=str(row.get("email_subject_b") or ""),
-                service=str(row.get("service") or ""),
-                vertical_key=str(extra["vertical_key"] or ""),
-                draft_source=str(row.get("draft_source") or ""),
-            )
-            result = set_status(item_id, "sent", extra)
-            _learn_quiet(with_llm=False)
-            return (200, result) if result.get("ok") else (400, result)
+            try:
+                return _approve_item(item_id, row, body)
+            except Exception as exc:
+                return 500, {"ok": False, "error": str(exc)[:400]}
         if action == "reject":
             result = set_status(
                 item_id,

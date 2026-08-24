@@ -193,7 +193,15 @@ def pipeline(status: str | None = None) -> dict[str, Any]:
 
 
 def approvals() -> dict[str, Any]:
-    return pipeline("pending_approval")
+    pending = list(pipeline("pending_approval").get("items") or [])
+    stuck = [
+        r
+        for r in (pipeline("approved").get("items") or [])
+        if not r.get("gmail_id")
+    ]
+    items = pending + stuck
+    items.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    return {"ok": True, "items": items, "status_labels": STATUS_HE}
 
 
 def _env_path() -> Path:

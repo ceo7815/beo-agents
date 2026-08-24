@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import html as html_mod
 import re
+import threading
+import time
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,11 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.settings.basic",
 ]
+
+GMAIL_LOCK = threading.Lock()
+GMAIL_HTTP_TIMEOUT = 20
+_SIG_CACHE: dict[str, tuple[float, str]] = {}
+_SIG_TTL = 3600.0
 
 
 def oauth_file_present() -> bool:
@@ -74,6 +81,22 @@ def _creds():
     HOME_TOKEN.parent.mkdir(parents=True, exist_ok=True)
     HOME_TOKEN.write_text(creds.to_json(), encoding="utf-8")
     return creds
+
+
+def _gmail_service():
+    creds = _creds()
+    if creds is None or not creds.valid:
+        return None
+    from googleapiclient.discovery import build
+
+    try:
+        import httplib2
+        from google_auth_httplib2 import AuthorizedHttp
+
+        http = AuthorizedHttp(creds, http=httplib2.Http(timeout=GMAIL_HTTP_TIMEOUT))
+        return build("gmail", "v1", http=http, cache_discovery=False)
+    except Exception:
+        return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
 
 def connect_interactive() -> dict[str, Any]:
@@ -199,6 +222,11 @@ def _constrain_signature_html(html: str) -> str:
 def _send_as_signature(service: Any, from_email: str) -> str:
     """Gmail UI signatures are not added to API mail unless we append them."""
     mailbox = (from_email or "").strip()
+    now = time.time()
+    cached = _SIG_CACHE.get(mailbox.lower())
+    if cached and now - cached[0] < _SIG_TTL:
+        return cached[1]
+    html = ""
     try:
         data = (
             service.users()
@@ -208,27 +236,32 @@ def _send_as_signature(service: Any, from_email: str) -> str:
             .execute()
         )
         html = str(data.get("signature") or "").strip()
-        if html:
-            return _constrain_signature_html(html)
     except Exception:
-        pass
-    try:
-        listing = service.users().settings().sendAs().list(userId="me").execute()
-        for row in listing.get("sendAs") or []:
-            html = str(row.get("signature") or "").strip()
-            if html and (
-                str(row.get("sendAsEmail") or "").lower() == mailbox.lower()
-                or row.get("isDefault")
-                or row.get("isPrimary")
-            ):
-                return _constrain_signature_html(html)
-        for row in listing.get("sendAs") or []:
-            html = str(row.get("signature") or "").strip()
-            if html:
-                return _constrain_signature_html(html)
-    except Exception:
-        return ""
-    return ""
+        html = ""
+    if not html:
+        try:
+            listing = service.users().settings().sendAs().list(userId="me").execute()
+            for row in listing.get("sendAs") or []:
+                candidate = str(row.get("signature") or "").strip()
+                if candidate and (
+                    str(row.get("sendAsEmail") or "").lower() == mailbox.lower()
+                    or row.get("isDefault")
+                    or row.get("isPrimary")
+                ):
+                    html = candidate
+                    break
+            if not html:
+                for row in listing.get("sendAs") or []:
+                    candidate = str(row.get("signature") or "").strip()
+                    if candidate:
+                        html = candidate
+                        break
+        except Exception:
+            html = ""
+    if html:
+        html = _constrain_signature_html(html)
+        _SIG_CACHE[mailbox.lower()] = (now, html)
+    return html
 
 
 def send_mail(
@@ -248,51 +281,45 @@ def send_mail(
             "ok": False,
             "error": "Gmail לא מחובר. הרץ scripts/connect-gmail.ps1 והתחבר עם sales@beosystem.com",
         }
-    try:
-        from googleapiclient.discovery import build
-    except ImportError:
-        return {"ok": False, "error": "חסר google-api-python-client"}
+    with GMAIL_LOCK:
+        try:
+            service = _gmail_service()
+            if service is None:
+                return {"ok": False, "error": "Gmail לא מחובר"}
+            signature_html = _send_as_signature(service, from_email)
+            html = body_to_html(body or "")
+            text = body or ""
+            if signature_html:
+                html = (
+                    f"{html}"
+                    '<div style="margin-top:24px;padding-top:12px;'
+                    'border-top:1px solid #e8eaed">'
+                    f"{signature_html}</div>"
+                )
+                sig_text = _strip_html(signature_html)
+                if sig_text:
+                    text = f"{text.rstrip()}\n\n{sig_text}"
 
-    try:
-        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)[:400]}
-
-    signature_html = _send_as_signature(service, from_email)
-    html = body_to_html(body or "")
-    text = body or ""
-    if signature_html:
-        html = (
-            f"{html}"
-            '<div style="margin-top:24px;padding-top:12px;'
-            'border-top:1px solid #e8eaed">'
-            f"{signature_html}</div>"
-        )
-        sig_text = _strip_html(signature_html)
-        if sig_text:
-            text = f"{text.rstrip()}\n\n{sig_text}"
-
-    msg = EmailMessage()
-    msg["To"] = to_email
-    msg["From"] = f"{from_name} <{from_email}>"
-    msg["Subject"] = subject or "(ללא נושא)"
-    msg.set_content(text, charset="utf-8")
-    msg.add_alternative(html, subtype="html", charset="utf-8")
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
-    try:
-        sent = (
-            service.users()
-            .messages()
-            .send(userId="me", body={"raw": raw})
-            .execute()
-        )
-        return {
-            "ok": True,
-            "gmail_id": sent.get("id"),
-            "gmail_thread_id": sent.get("threadId"),
-        }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)[:400]}
+            msg = EmailMessage()
+            msg["To"] = to_email
+            msg["From"] = f"{from_name} <{from_email}>"
+            msg["Subject"] = subject or "(ללא נושא)"
+            msg.set_content(text, charset="utf-8")
+            msg.add_alternative(html, subtype="html", charset="utf-8")
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+            sent = (
+                service.users()
+                .messages()
+                .send(userId="me", body={"raw": raw})
+                .execute()
+            )
+            return {
+                "ok": True,
+                "gmail_id": sent.get("id"),
+                "gmail_thread_id": sent.get("threadId"),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:400]}
 
 
 def _extract_addr(from_raw: str) -> str:
@@ -375,40 +402,39 @@ def _classify_reply(subject: str, snippet: str, from_email: str = "") -> str:
 
 def find_inbox_replies(sent_by_email: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Match inbox messages to sent outreach. Never logs message bodies."""
-    creds = _creds()
-    if creds is None or not creds.valid:
-        return []
-    try:
-        from googleapiclient.discovery import build
-    except ImportError:
-        return []
-    try:
-        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
-        listed = (
-            service.users()
-            .messages()
-            .list(userId="me", q="in:inbox newer_than:21d -from:me", maxResults=40)
-            .execute()
-        )
-    except Exception:
-        return []
-    hits: list[dict[str, Any]] = []
-    seen_items: set[str] = set()
-    for msg_ref in listed.get("messages") or []:
+    with GMAIL_LOCK:
         try:
-            msg = (
+            service = _gmail_service()
+            if service is None:
+                return []
+            listed = (
                 service.users()
                 .messages()
-                .get(
-                    userId="me",
-                    id=msg_ref["id"],
-                    format="metadata",
-                    metadataHeaders=["From", "Subject"],
-                )
+                .list(userId="me", q="in:inbox newer_than:21d -from:me", maxResults=15)
                 .execute()
             )
+            raw_msgs: list[dict[str, Any]] = []
+            for msg_ref in listed.get("messages") or []:
+                try:
+                    raw_msgs.append(
+                        service.users()
+                        .messages()
+                        .get(
+                            userId="me",
+                            id=msg_ref["id"],
+                            format="metadata",
+                            metadataHeaders=["From", "Subject"],
+                        )
+                        .execute()
+                    )
+                except Exception:
+                    continue
         except Exception:
-            continue
+            return []
+
+    hits: list[dict[str, Any]] = []
+    seen_items: set[str] = set()
+    for msg in raw_msgs:
         headers = {
             str(h.get("name") or "").lower(): str(h.get("value") or "")
             for h in (msg.get("payload") or {}).get("headers") or []
