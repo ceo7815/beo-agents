@@ -453,6 +453,12 @@ def _llm_answer(question: str) -> str:
     try:
         with urllib.request.urlopen(req, timeout=120, context=CTX) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
+        try:
+            from leads_usage import record_from_response
+
+            record_from_response(raw, "telegram")
+        except Exception:
+            pass
         text = str(raw["choices"][0]["message"]["content"] or "").strip()
         return text or "אין לי תשובה ברורה על זה."
     except urllib.error.HTTPError as exc:
@@ -560,32 +566,6 @@ def _maybe_schedule() -> None:
     if pending_today_count() >= 10:
         notify_ten_ready()
 
-    state = _state()
-    if now.hour == 10 and state.get("morning_on") != day:
-        n = pending_today_count()
-        already = state.get("pending10_on") == day
-        researching = (
-            state.get("research_on") == day and state.get("research_done") != day
-        )
-        if already:
-            pass
-        elif researching:
-            pass
-        elif n >= 10:
-            notify_ten_ready()
-        elif n > 0:
-            notify_or(
-                f"בוקר.\n\nיש {n} טיוטות מוכנות היום (יעד 10).\n"
-                "אישור ושליחה רק ב-Beo OS."
-            )
-        else:
-            notify_or(
-                "בוקר.\n\nאין טיוטות מוכנות היום.\n"
-                "אפשר להריץ מחקר יומי מלוח Beo Leads."
-            )
-        state = _state()
-        state["morning_on"] = day
-        _save_state(state)
     state = _state()
     if now.hour >= 17 and now.hour < 20 and state.get("eod_on") != day:
         notify_or(eod_text())

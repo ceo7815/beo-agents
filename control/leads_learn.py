@@ -315,6 +315,12 @@ def _llm_lesson(payload: dict[str, Any]) -> str | None:
     try:
         with urllib.request.urlopen(req, timeout=45, context=CTX) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
+        try:
+            from leads_usage import record_from_response
+
+            record_from_response(raw, "learn")
+        except Exception:
+            pass
         text = raw["choices"][0]["message"]["content"].strip()
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?", "", text).strip()

@@ -23,7 +23,10 @@ Enable push-to-deploy (webhook).
 | `SOCIAL_TELEGRAM_BOT_TOKEN` | עדי / Beo Social bot |
 | `TELEGRAM_ALLOWED_USERS` | Or's Telegram id |
 | `GMAIL_FROM` | `sales@beosystem.com` |
-| `GMAIL_FROM_NAME` | `שי \| Beo Systems` |
+| `GMAIL_FROM_NAME` | `Shay_Beo_Systems` |
+| `GMAIL_REFRESH_TOKEN` | from local `gmail-token.json` (connect once on the PC) |
+| `GMAIL_CLIENT_ID` | Google OAuth client id |
+| `GMAIL_CLIENT_SECRET` | Google OAuth client secret |
 | `WHATSAPP_ME_URL` | `https://wa.me/33632519053` |
 
 Then Deploy. Beo OS should proxy `/api/beo-agents` to `http://127.0.0.1:8788`.

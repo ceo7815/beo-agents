@@ -12,6 +12,7 @@ from typing import Any
 REPO = Path(__file__).resolve().parents[1]
 OAUTH = REPO / "agents" / "leads-beo" / "secrets" / "gmail-oauth.json"
 TOKEN = REPO / "agents" / "leads-beo" / "secrets" / "gmail-token.json"
+HOME_TOKEN = REPO / "agents" / "leads-beo" / "home" / "secrets" / "gmail-token.json"
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
@@ -25,19 +26,52 @@ def oauth_file_present() -> bool:
 
 
 def token_present() -> bool:
-    return TOKEN.is_file()
+    if TOKEN.is_file() or HOME_TOKEN.is_file():
+        return True
+    try:
+        from leads_store import _env_value
+    except Exception:
+        return False
+    return bool((_env_value("GMAIL_REFRESH_TOKEN") or "").strip())
+
+
+def _token_file() -> Path:
+    if HOME_TOKEN.is_file():
+        return HOME_TOKEN
+    return TOKEN
 
 
 def _creds():
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
+    from leads_store import _env_value
+
+    path = _token_file()
     creds = None
-    if TOKEN.is_file():
-        creds = Credentials.from_authorized_user_file(str(TOKEN), SCOPES)
-    if creds and creds.expired and creds.refresh_token:
+    if path.is_file():
+        creds = Credentials.from_authorized_user_file(str(path), SCOPES)
+    if creds is None:
+        refresh = (_env_value("GMAIL_REFRESH_TOKEN") or "").strip()
+        client_id = (_env_value("GMAIL_CLIENT_ID") or "").strip()
+        client_secret = (_env_value("GMAIL_CLIENT_SECRET") or "").strip()
+        if refresh and client_id and client_secret:
+            creds = Credentials(
+                token=None,
+                refresh_token=refresh,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=client_id,
+                client_secret=client_secret,
+                scopes=SCOPES,
+            )
+    if not creds:
+        return None
+    if not creds.valid:
+        if not creds.refresh_token:
+            return None
         creds.refresh(Request())
-        TOKEN.write_text(creds.to_json(), encoding="utf-8")
+    HOME_TOKEN.parent.mkdir(parents=True, exist_ok=True)
+    HOME_TOKEN.write_text(creds.to_json(), encoding="utf-8")
     return creds
 
 

@@ -19,6 +19,9 @@ services:
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
       GMAIL_FROM: ${GMAIL_FROM:-sales@beosystem.com}
       GMAIL_FROM_NAME: ${GMAIL_FROM_NAME:-Shay Beo Systems}
+      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
       WHATSAPP_ME_URL: ${WHATSAPP_ME_URL:-https://wa.me/33632519053}
     volumes:
       - leads-home:/opt/beo-agents/agents/leads-beo/home

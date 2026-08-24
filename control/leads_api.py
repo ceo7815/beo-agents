@@ -117,6 +117,10 @@ def handle_get(path: str) -> tuple[int, dict[str, Any]]:
         return 200, approvals()
     if clean == "/api/leads/learning":
         return 200, public_state()
+    if clean == "/api/leads/costs":
+        from leads_usage import public_report
+
+        return 200, public_report()
     if clean.startswith("/api/leads/items/"):
         item_id = clean.split("/")[-1]
         row = get_item(item_id)

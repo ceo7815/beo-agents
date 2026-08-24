@@ -39,7 +39,7 @@ def _tick() -> None:
     if not leads_is_on() or not _il_workday(_il_now()):
         return
     now = _il_now()
-    if now.hour < 7 or now.hour >= 17:
+    if now.hour < 10 or now.hour >= 17:
         return
     day = today_il()
     state = _state()
@@ -61,9 +61,25 @@ def _tick() -> None:
         _log(f"run_daily {result.get('message') or 'done'}")
     except Exception as exc:
         _log(f"run_daily failed {type(exc).__name__}")
+        result = {}
     state = _state()
     state["research_done"] = day
     _save_state(state)
+    n = pending_today_count()
+    if n >= 10:
+        notify_ten_ready()
+    elif n > 0:
+        from leads_telegram import notify_or
+
+        notify_or(
+            f"המחקר היומי הסתיים.\n\nיש {n} טיוטות לאישור ב-Beo OS."
+        )
+    else:
+        from leads_telegram import notify_or
+
+        notify_or(
+            "המחקר היומי הסתיים.\n\nלא נמצאו טיוטות היום — אפשר להריץ שוב מ-Beo OS."
+        )
 
 
 def _loop() -> None:

@@ -941,6 +941,12 @@ def _llm_enrich(
     try:
         with urllib.request.urlopen(req, timeout=60, context=CTX) as resp:
             body = json.loads(resp.read().decode("utf-8"))
+        try:
+            from leads_usage import record_from_response
+
+            record_from_response(body, "research")
+        except Exception:
+            pass
         text = body["choices"][0]["message"]["content"].strip()
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?", "", text).strip()

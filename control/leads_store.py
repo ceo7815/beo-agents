@@ -232,8 +232,13 @@ def gmail_oauth_present() -> bool:
 
 
 def gmail_connected() -> bool:
-    token = REPO / "agents" / "leads-beo" / "secrets" / "gmail-token.json"
-    return token.is_file() or bool(_env_value("GMAIL_REFRESH_TOKEN"))
+    for path in (
+        REPO / "agents" / "leads-beo" / "secrets" / "gmail-token.json",
+        REPO / "agents" / "leads-beo" / "home" / "secrets" / "gmail-token.json",
+    ):
+        if path.is_file():
+            return True
+    return bool(_env_value("GMAIL_REFRESH_TOKEN"))
 
 
 def set_status(item_id: str, status: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
