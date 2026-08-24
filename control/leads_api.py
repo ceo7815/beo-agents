@@ -18,7 +18,7 @@ from leads_store import (
 )
 from leads_research import redraft_pending, run_daily
 from leads_learn import extract_copy_features, infer_vertical, learn, public_state
-from gmail_client import find_inbox_replies, send_mail, token_present
+from gmail_client import find_inbox_replies, send_mail, sent_by_recipient, token_present
 
 
 def _learn_quiet(*, with_llm: bool = False) -> None:
@@ -127,6 +127,39 @@ def _read_json(raw: bytes) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def reconcile_sent() -> None:
+    """If Gmail already sent it, drop the card from the approval queue."""
+    waiting = [
+        r
+        for r in (pipeline().get("items") or [])
+        if r.get("status") in {"pending_approval", "approved"} and r.get("email")
+    ]
+    if not waiting:
+        return
+    try:
+        sent = sent_by_recipient()
+    except Exception:
+        return
+    if not sent:
+        return
+    for row in waiting:
+        email = str(row.get("email") or "").strip().lower()
+        hit = sent.get(email)
+        if not hit:
+            continue
+        set_status(
+            str(row.get("id") or ""),
+            "sent",
+            {
+                "gmail_id": hit.get("gmail_id") or row.get("gmail_id"),
+                "gmail_thread_id": hit.get("gmail_thread_id") or row.get("gmail_thread_id"),
+                "sent_at": row.get("sent_at") or _now(),
+                "status_note": "נשלח מ-sales@beosystem.com",
+                "updated_at": _now(),
+            },
+        )
+
+
 def _approve_item(item_id: str, row: dict[str, Any], body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """Leave the approval queue first, then send. Safe to retry."""
     if row.get("gmail_id"):
@@ -182,17 +215,26 @@ def _approve_item(item_id: str, row: dict[str, Any], body: dict[str, Any]) -> tu
     extra["gmail_id"] = sent.get("gmail_id")
     extra["gmail_thread_id"] = sent.get("gmail_thread_id")
     extra["status_note"] = "נשלח מ-sales@beosystem.com"
-    extra["vertical_key"] = row.get("vertical_key") or infer_vertical(row)
-    extra["copy_features"] = extract_copy_features(
-        subject=subject,
-        body=mail_body,
-        owner=str(row.get("owner_name") or ""),
-        subject_b=str(row.get("email_subject_b") or ""),
-        service=str(row.get("service") or ""),
-        vertical_key=str(extra["vertical_key"] or ""),
-        draft_source=str(row.get("draft_source") or ""),
-    )
     result = set_status(item_id, "sent", extra)
+    try:
+        set_status(
+            item_id,
+            "sent",
+            {
+                "vertical_key": row.get("vertical_key") or infer_vertical(row),
+                "copy_features": extract_copy_features(
+                    subject=subject,
+                    body=mail_body,
+                    owner=str(row.get("owner_name") or ""),
+                    subject_b=str(row.get("email_subject_b") or ""),
+                    service=str(row.get("service") or ""),
+                    vertical_key=str(row.get("vertical_key") or infer_vertical(row) or ""),
+                    draft_source=str(row.get("draft_source") or ""),
+                ),
+            },
+        )
+    except Exception:
+        pass
     _learn_quiet(with_llm=False)
     return (200, result) if result.get("ok") else (400, result)
 
@@ -212,6 +254,7 @@ def handle_get(path: str) -> tuple[int, dict[str, Any]]:
         status = (qs.get("status") or [None])[0]
         return 200, pipeline(status)
     if clean == "/api/leads/approvals":
+        reconcile_sent()
         return 200, approvals()
     if clean == "/api/leads/learning":
         return 200, public_state()

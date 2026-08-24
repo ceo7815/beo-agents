@@ -197,7 +197,7 @@ def approvals() -> dict[str, Any]:
     stuck = [
         r
         for r in (pipeline("approved").get("items") or [])
-        if not r.get("gmail_id")
+        if not r.get("gmail_id") and not r.get("sent_at")
     ]
     items = pending + stuck
     items.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)

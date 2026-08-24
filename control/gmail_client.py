@@ -513,3 +513,50 @@ def find_inbox_replies(sent_by_email: dict[str, dict[str, Any]]) -> list[dict[st
             }
         )
     return hits
+
+
+def sent_by_recipient() -> dict[str, dict[str, str]]:
+    """Most recent Sent message per recipient email. Used to close stuck approval cards."""
+    with GMAIL_LOCK:
+        try:
+            service = _gmail_service()
+            if service is None:
+                return {}
+            listed = (
+                service.users()
+                .messages()
+                .list(userId="me", q="in:sent newer_than:21d", maxResults=40)
+                .execute()
+            )
+            raw_msgs: list[dict[str, Any]] = []
+            for msg_ref in listed.get("messages") or []:
+                try:
+                    raw_msgs.append(
+                        service.users()
+                        .messages()
+                        .get(
+                            userId="me",
+                            id=msg_ref["id"],
+                            format="metadata",
+                            metadataHeaders=["To", "Subject"],
+                        )
+                        .execute()
+                    )
+                except Exception:
+                    continue
+        except Exception:
+            return {}
+    out: dict[str, dict[str, str]] = {}
+    for msg in raw_msgs:
+        headers = {
+            str(h.get("name") or "").lower(): str(h.get("value") or "")
+            for h in (msg.get("payload") or {}).get("headers") or []
+        }
+        to_email = _extract_addr(headers.get("to") or "")
+        if not to_email or to_email in out:
+            continue
+        out[to_email] = {
+            "gmail_id": str(msg.get("id") or ""),
+            "gmail_thread_id": str(msg.get("threadId") or ""),
+        }
+    return out
