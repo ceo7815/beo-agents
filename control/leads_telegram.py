@@ -72,7 +72,32 @@ ACTION_HINTS = (
 
 def _allowed() -> set[str]:
     raw = _env_value("TELEGRAM_ALLOWED_USERS") or ""
-    return {p.strip() for p in raw.split(",") if p.strip()}
+    out: set[str] = set()
+    for part in raw.split(","):
+        p = part.strip().strip('"').strip("'")
+        if not p:
+            continue
+        out.add(p)
+        digits = "".join(c for c in p if c.isdigit())
+        if digits:
+            out.add(digits)
+    return out
+
+
+def _is_allowed(user_id: str, chat_id: int | None = None) -> bool:
+    allowed = _allowed()
+    if not allowed:
+        return True
+    uid = str(user_id or "").strip()
+    cid = str(chat_id or "").strip()
+    uid_digits = "".join(c for c in uid if c.isdigit())
+    cid_digits = "".join(c for c in cid if c.isdigit())
+    return bool(
+        uid in allowed
+        or cid in allowed
+        or (uid_digits and uid_digits in allowed)
+        or (cid_digits and cid_digits in allowed)
+    )
 
 
 def _token() -> str:
@@ -84,7 +109,7 @@ def _or_chat() -> str | None:
     return users[0] if users else None
 
 
-def _tg(method: str, *, timeout: float = 40, **params: Any) -> dict[str, Any]:
+def _tg(method: str, *, http_timeout: float = 40, **params: Any) -> dict[str, Any]:
     token = _token()
     if not token:
         return {"ok": False, "error": "no token"}
@@ -94,7 +119,7 @@ def _tg(method: str, *, timeout: float = 40, **params: Any) -> dict[str, Any]:
     ).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=CTX) as resp:
+        with urllib.request.urlopen(req, timeout=http_timeout, context=CTX) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         err = ""
@@ -214,7 +239,7 @@ def _chunks(text: str, limit: int = 3900) -> list[str]:
 
 
 def send_typing(chat_id: int | str) -> None:
-    _tg("sendChatAction", timeout=8, chat_id=str(chat_id), action="typing")
+    _tg("sendChatAction", chat_id=str(chat_id), action="typing")
 
 
 @contextmanager
@@ -384,9 +409,29 @@ def eod_text() -> str:
 
 def _norm_ask(text: str) -> str:
     t = (text or "").strip().lower()
+    t = t.replace("\u200f", "").replace("\u200e", "").replace("\xa0", " ")
     t = t.replace("؟", "?").replace("!", "")
-    t = re.sub(r"[?]+", "", t)
+    t = re.sub(r"[?؟]+", "", t)
     return re.sub(r"\s+", " ", t).strip()
+
+
+def _is_quick_ask(low: str) -> bool:
+    if low in {
+        "מה קורה",
+        "מה נשמע",
+        "מה המצב",
+        "מה חדש",
+        "היי",
+        "שלום",
+        "הי",
+        "סטטוס",
+        "מה איתך",
+        "מה קורה אצלך",
+    }:
+        return True
+    if low.startswith("מה קורה") and len(low) < 24:
+        return True
+    return False
 
 
 def _talk_status() -> str:
@@ -500,8 +545,8 @@ def _llm_answer(question: str) -> str:
 
 
 def handle_text(chat_id: int, user_id: str, text: str) -> None:
-    allowed = _allowed()
-    if allowed and user_id not in allowed:
+    if not _is_allowed(user_id, chat_id):
+        _log(f"ignore uid={user_id} chat={chat_id}")
         return
     msg = (text or "").strip()
     if not msg:
@@ -518,16 +563,7 @@ def handle_text(chat_id: int, user_id: str, text: str) -> None:
     if low in {"/today", "היום", "מה היום", "סיכום"}:
         send_message(chat_id, _today_text())
         return
-    if low in {
-        "מה קורה",
-        "מה נשמע",
-        "מה המצב",
-        "מה חדש",
-        "היי",
-        "שלום",
-        "הי",
-        "סטטוס",
-    }:
+    if _is_quick_ask(low):
         send_message(chat_id, _talk_status())
         return
     if low in {"/report", "דוח", "סוף יום"}:
@@ -608,6 +644,17 @@ def _maybe_schedule() -> None:
         notify_ten_ready()
 
 
+def _safe_handle(chat_id: int, user_id: str, text: str) -> None:
+    try:
+        handle_text(chat_id, user_id, text)
+    except Exception as exc:
+        _log(f"handle {type(exc).__name__}")
+        try:
+            send_message(chat_id, "רגע, נתקעתי. תשאל שוב.")
+        except Exception:
+            pass
+
+
 def _inbox_loop() -> None:
     while True:
         time.sleep(90)
@@ -647,7 +694,7 @@ def _loop() -> None:
             greeted = True
         if leads_is_on():
             _maybe_schedule()
-        data = _tg("getUpdates", offset=str(offset), timeout="20")
+        data = _tg("getUpdates", http_timeout=50, offset=str(offset), timeout=25)
         if not data.get("ok"):
             _log(f"getUpdates fail {data.get('error')}")
             time.sleep(2)
@@ -664,14 +711,12 @@ def _loop() -> None:
             user_id = str(user.get("id") or "")
             if chat_id is None or not text:
                 continue
-            try:
-                handle_text(int(chat_id), user_id, text)
-            except Exception as exc:
-                _log(f"handle {type(exc).__name__}")
-                try:
-                    send_message(int(chat_id), "רגע, נתקעתי. תשאל שוב.")
-                except Exception:
-                    pass
+            threading.Thread(
+                target=_safe_handle,
+                args=(int(chat_id), user_id, text),
+                daemon=True,
+                name="leads-tg-msg",
+            ).start()
 
 
 def start_telegram_thread() -> None:
