@@ -29,7 +29,7 @@ CHAT_PATH = HOME / "chat.json"
 LOCK_PATH = HOME / "poller.lock"
 SEEN_PATH = HOME / "seen.json"
 API = "https://api.openai.com/v1/chat/completions"
-IL = timezone(timedelta(hours=3))
+NOTIFY_LOCK = threading.Lock()
 
 PERSONA = (
     "אתה שי | Beo Leads. עובד של אור, מנכ״ל Beo Systems.\n"
@@ -282,13 +282,19 @@ def notify_inbox_reply(row: dict[str, Any] | None, kind: str) -> None:
     if not row:
         return
     item_id = str(row.get("id") or "")
-    state = _state()
-    seen = [str(x) for x in (state.get("replied_ids") or [])]
-    mark = f"{item_id}:{kind}"
-    if mark in seen:
-        return
+    email = str(row.get("email") or "").strip().lower()
+    marks = [f"{item_id}:{kind}"]
+    if email:
+        marks.append(f"{email}:{kind}")
+    with NOTIFY_LOCK:
+        state = _state()
+        seen = [str(x) for x in (state.get("replied_ids") or [])]
+        if any(m in seen for m in marks):
+            return
+        seen.extend(marks)
+        state["replied_ids"] = seen[-400:]
+        _save_state(state)
     company = str(row.get("company") or "חברה")
-    email = str(row.get("email") or "")
     why = str(row.get("score_why") or row.get("site_hook") or "").strip()
     preview = str(row.get("reply_preview") or "").strip()
     if kind == "human":
@@ -332,27 +338,34 @@ def notify_inbox_reply(row: dict[str, Any] | None, kind: str) -> None:
             "עדיין מחכים לתשובה אנושית.",
         ]
     notify_or("\n".join(lines))
-    seen.append(mark)
-    state["replied_ids"] = seen[-400:]
-    _save_state(state)
 
 
 def eod_text() -> str:
     data = end_of_day()
     lines = [
-        f"דוח סוף יום — {data['date']}",
+        f"דוח סוף יום — {data['date']} · 18:00",
         "",
         f"נשלחו היום: {data['sent_today']}",
-        f"ענו: {data['replied_today']}",
-        f"נשלחו ולא חזרו: {data['waiting']}",
+        f"ענו (ליד): {data['replied_today']}",
+        f"כתובת לא נכונה: {data.get('bounced_today') or 0}",
+        f"מחכים לתשובה: {data['waiting']}",
+        f"ממתינים לאישור: {data['pending']}",
         f"נסגרו בלי מענה: {data['closed']}",
-        f"עדיין ממתינים לאישור: {data['pending']}",
     ]
     if data.get("sent_rows"):
         lines += ["", "נשלחו:"]
         for row in data["sent_rows"]:
-            flag = "ענו" if row.get("replied") else "לא חזר"
-            lines.append(f"• {row.get('company')} · {flag}")
+            if row.get("bounced"):
+                flag = "כתובת שגויה"
+            elif row.get("replied"):
+                flag = "ענו"
+            else:
+                flag = "מחכים לתשובה"
+            lines.append(f"• {row.get('company')} · {row.get('email')} · {flag}")
+    if data.get("bounced_rows"):
+        lines += ["", "כתובות שגויות:"]
+        for row in data["bounced_rows"]:
+            lines.append(f"• {row.get('company')} · {row.get('email')}")
     if data.get("replied_rows"):
         lines += ["", "מי שענו:"]
         for row in data["replied_rows"]:
@@ -361,6 +374,11 @@ def eod_text() -> str:
         lines += ["", "מחכים לתשובה:"]
         for row in data["waiting_rows"]:
             lines.append(f"• {row.get('company')} · {row.get('email')}")
+    if data.get("pending_rows"):
+        lines += ["", "עדיין ממתינים לאישור:"]
+        for row in data["pending_rows"][:10]:
+            lines.append(f"• {row.get('company')} · ציון {row.get('score')}")
+    lines += ["", "אישור ושליחה רק ב-Beo OS."]
     return "\n".join(lines)
 
 
@@ -378,18 +396,19 @@ def _talk_status() -> str:
     n = pending_today_count()
     sent = int(ov.get("sent_today") or 0)
     replied = int(ov.get("replied") or 0)
-    if n and not sent:
-        return (
-            f"יש לך {n} טיוטות שמחכות ב-Beo OS. "
-            "עוד לא יצא מייל היום — כשתאשר, נשלח."
-        )
-    if sent and not replied:
-        return f"יצאו היום {sent} מיילים. עדיין מחכים שיחזרו תשובות."
-    if replied:
-        return f"היום יצאו {sent}, וחזרו {replied} תשובות."
+    bounced = int(ov.get("bounced") or 0)
+    bits = []
     if n:
-        return f"יש {n} טיוטות מוכנות ב-Beo OS."
-    return "שקט אצל הלידים. עוד אין טיוטות היום."
+        bits.append(f"{n} טיוטות מחכות לאישור ב-Beo OS")
+    if sent:
+        bits.append(f"{sent} מיילים יצאו היום")
+    if replied:
+        bits.append(f"{replied} תשובות אנושיות")
+    if bounced:
+        bits.append(f"{bounced} כתובות שגויות")
+    if not bits:
+        return "שקט אצל הלידים. עוד אין טיוטות היום. תשאל אותי חופשי."
+    return " · ".join(bits) + ". תשאל על כל חברה או מייל."
 
 
 def _looks_like_action(text: str) -> bool:
@@ -462,7 +481,7 @@ def _llm_answer(question: str) -> str:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=120, context=CTX) as resp:
+        with urllib.request.urlopen(req, timeout=50, context=CTX) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         try:
             from leads_usage import record_from_response
@@ -498,6 +517,18 @@ def handle_text(chat_id: int, user_id: str, text: str) -> None:
         return
     if low in {"/today", "היום", "מה היום", "סיכום"}:
         send_message(chat_id, _today_text())
+        return
+    if low in {
+        "מה קורה",
+        "מה נשמע",
+        "מה המצב",
+        "מה חדש",
+        "היי",
+        "שלום",
+        "הי",
+        "סטטוס",
+    }:
+        send_message(chat_id, _talk_status())
         return
     if low in {"/report", "דוח", "סוף יום"}:
         send_message(chat_id, eod_text())
@@ -573,17 +604,8 @@ def _il_workday(now: datetime) -> bool:
 def _maybe_schedule() -> None:
     if not _token() or not _or_chat() or not _scheduler_enabled():
         return
-    now = _il_now()
-    day = today_il()
     if pending_today_count() >= 10:
         notify_ten_ready()
-
-    state = _state()
-    if now.hour >= 17 and now.hour < 20 and state.get("eod_on") != day:
-        notify_or(eod_text())
-        state = _state()
-        state["eod_on"] = day
-        _save_state(state)
 
 
 def _inbox_loop() -> None:
@@ -608,9 +630,6 @@ def _loop() -> None:
         if not token:
             time.sleep(8)
             continue
-        if not leads_is_on():
-            time.sleep(3)
-            continue
         if not commands_set:
             _tg("deleteWebhook")
             _tg(
@@ -626,7 +645,8 @@ def _loop() -> None:
             commands_set = True
         if not greeted:
             greeted = True
-        _maybe_schedule()
+        if leads_is_on():
+            _maybe_schedule()
         data = _tg("getUpdates", offset=str(offset), timeout="20")
         if not data.get("ok"):
             _log(f"getUpdates fail {data.get('error')}")

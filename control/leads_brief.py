@@ -149,6 +149,12 @@ def briefing() -> dict[str, Any]:
         "waiting_for_reply": pick("sent"),
         "all_replied": pick("replied"),
         "all_bounced": pick("bounced"),
+        "today_bounced": [
+            r
+            for r in items
+            if r.get("status") == "bounced"
+            and _il_date(str(r.get("bounced_at") or r.get("updated_at") or "")) == day
+        ],
         "closed_no_reply": pick("closed_no_reply"),
         "pending_all": pick("pending_approval"),
         "rejected": pick("rejected"),
@@ -313,18 +319,25 @@ def end_of_day() -> dict[str, Any]:
     replied_today = list(pack.get("today_replied") or [])
     closed = list(pack.get("closed_no_reply") or [])
     pending = list(pack.get("pending_all") or [])
+    bounced = list(pack.get("today_bounced") or pack.get("all_bounced") or [])
+    bounced_emails = {
+        str(r.get("email") or "").strip().lower() for r in bounced if r.get("email")
+    }
     sent_rows = []
     waiting_from_today = []
     for row in sent:
+        email = str(row.get("email") or "").strip().lower()
         did = row.get("status") == "replied" or bool(row.get("replied_day"))
+        is_bounce = row.get("status") == "bounced" or email in bounced_emails
         item = {
             "company": row.get("company"),
             "email": row.get("email"),
             "replied": did,
+            "bounced": is_bounce,
             "vertical": row.get("vertical_he"),
         }
         sent_rows.append(item)
-        if not did and row.get("status") == "sent":
+        if not did and not is_bounce and row.get("status") == "sent":
             waiting_from_today.append(item)
     waiting_rows = waiting_from_today + [
         {
@@ -343,7 +356,11 @@ def end_of_day() -> dict[str, Any]:
         "waiting": len(waiting_all),
         "closed": len(closed),
         "pending": len(pending),
+        "bounced_today": len(bounced),
         "sent_rows": sent_rows,
+        "bounced_rows": [
+            {"company": r.get("company"), "email": r.get("email")} for r in bounced
+        ],
         "replied_rows": [
             {
                 "company": r.get("company"),
@@ -352,4 +369,7 @@ def end_of_day() -> dict[str, Any]:
             for r in replied_today
         ],
         "waiting_rows": waiting_rows[:20],
+        "pending_rows": [
+            {"company": r.get("company"), "score": r.get("score")} for r in pending[:10]
+        ],
     }

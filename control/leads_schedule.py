@@ -34,11 +34,25 @@ def _il_workday(now: datetime) -> bool:
 
 def _tick() -> None:
     from leads_research import run_daily
-    from leads_telegram import _save_state, _state, notify_ten_ready
+    from leads_telegram import _save_state, _state, eod_text, notify_or, notify_ten_ready
 
-    if not leads_is_on() or not _il_workday(_il_now()):
-        return
     now = _il_now()
+    day = today_il()
+    workday = _il_workday(now)
+
+    if workday and now.hour == 18:
+        state = _state()
+        if state.get("eod_on") != day:
+            try:
+                notify_or(eod_text())
+            except Exception:
+                _log("eod send failed")
+            state = _state()
+            state["eod_on"] = day
+            _save_state(state)
+
+    if not leads_is_on() or not workday:
+        return
     if now.hour < 10 or now.hour >= 17:
         return
     day = today_il()
