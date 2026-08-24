@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from runtime import agent_by_id, fleet, snapshot, start_agent, stop_agent
 import leads_api
 from leads_telegram import start_telegram_thread
+from leads_schedule import start_schedule_thread
 
 HOST = os.environ.get("BEO_CONTROL_HOST", "127.0.0.1")
 PORT = int(os.environ.get("BEO_CONTROL_PORT", "8788"))
@@ -55,7 +56,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
         if path in {"/", "/api/health"}:
-            _json(self, 200, {"ok": True, "service": "beo-agents-control"})
+            _json(
+                self,
+                200,
+                {
+                    "ok": True,
+                    "service": "beo-agents-control",
+                    "daily_research": "server",
+                },
+            )
             return
         if path == "/api/fleet":
             _json(self, 200, fleet())
@@ -96,6 +105,7 @@ def main() -> None:
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Beo control http://{HOST}:{PORT}", flush=True)
     start_telegram_thread()
+    start_schedule_thread()
     httpd.serve_forever()
 
 
