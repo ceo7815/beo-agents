@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import html as html_mod
+import json
 import re
 import threading
 import time
@@ -16,12 +17,17 @@ OAUTH = REPO / "agents" / "leads-beo" / "secrets" / "gmail-oauth.json"
 TOKEN = REPO / "agents" / "leads-beo" / "secrets" / "gmail-token.json"
 HOME_TOKEN = REPO / "agents" / "leads-beo" / "home" / "secrets" / "gmail-token.json"
 
-SCOPES = [
+SEND_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.readonly",
+]
+# Signature HTML needs this extra scope. Old refresh tokens do not have it —
+# never request it on refresh or Google returns invalid_scope and send fails.
+CONNECT_SCOPES = SEND_SCOPES + [
     "https://www.googleapis.com/auth/gmail.settings.basic",
 ]
+SCOPES = SEND_SCOPES
 
 GMAIL_LOCK = threading.Lock()
 GMAIL_HTTP_TIMEOUT = 20
@@ -49,6 +55,20 @@ def _token_file() -> Path:
     return TOKEN
 
 
+def _scopes_for_file(path: Path) -> list[str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return list(SEND_SCOPES)
+    raw = data.get("scopes") or data.get("scope") or []
+    if isinstance(raw, str):
+        raw = raw.split()
+    if not isinstance(raw, list) or not raw:
+        return list(SEND_SCOPES)
+    cleaned = [str(s) for s in raw if "settings.basic" not in str(s)]
+    return cleaned or list(SEND_SCOPES)
+
+
 def _creds():
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -57,8 +77,10 @@ def _creds():
 
     path = _token_file()
     creds = None
+    scopes = list(SEND_SCOPES)
     if path.is_file():
-        creds = Credentials.from_authorized_user_file(str(path), SCOPES)
+        scopes = _scopes_for_file(path)
+        creds = Credentials.from_authorized_user_file(str(path), scopes)
     if creds is None:
         refresh = (_env_value("GMAIL_REFRESH_TOKEN") or "").strip()
         client_id = (_env_value("GMAIL_CLIENT_ID") or "").strip()
@@ -70,14 +92,25 @@ def _creds():
                 token_uri="https://oauth2.googleapis.com/token",
                 client_id=client_id,
                 client_secret=client_secret,
-                scopes=SCOPES,
+                scopes=SEND_SCOPES,
             )
     if not creds:
         return None
     if not creds.valid:
         if not creds.refresh_token:
             return None
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except Exception:
+            creds = Credentials(
+                token=None,
+                refresh_token=creds.refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=creds.client_id,
+                client_secret=creds.client_secret,
+                scopes=SEND_SCOPES,
+            )
+            creds.refresh(Request())
     HOME_TOKEN.parent.mkdir(parents=True, exist_ok=True)
     HOME_TOKEN.write_text(creds.to_json(), encoding="utf-8")
     return creds
@@ -110,7 +143,7 @@ def connect_interactive() -> dict[str, Any]:
             "ok": False,
             "error": "חסרות חבילות Google. הרץ: pip install google-auth-oauthlib google-api-python-client",
         }
-    flow = InstalledAppFlow.from_client_secrets_file(str(OAUTH), SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(str(OAUTH), CONNECT_SCOPES)
     creds = flow.run_local_server(port=0, prompt="consent")
     TOKEN.parent.mkdir(parents=True, exist_ok=True)
     TOKEN.write_text(creds.to_json(), encoding="utf-8")
@@ -275,7 +308,16 @@ def send_mail(
     to_email = (to_email or "").strip()
     if not to_email or "@" not in to_email:
         return {"ok": False, "error": "אין כתובת נמען"}
-    creds = _creds()
+    try:
+        creds = _creds()
+    except Exception as exc:
+        text = str(exc)
+        if "invalid_scope" in text.lower():
+            return {
+                "ok": False,
+                "error": "Gmail דחה הרשאה ישנה. רעננו ושלחו שוב.",
+            }
+        return {"ok": False, "error": text[:400]}
     if creds is None or not creds.valid:
         return {
             "ok": False,
@@ -319,7 +361,13 @@ def send_mail(
                 "gmail_thread_id": sent.get("threadId"),
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)[:400]}
+            text = str(exc)
+            if "invalid_scope" in text.lower():
+                return {
+                    "ok": False,
+                    "error": "Gmail דחה הרשאה ישנה. רעננו ושלחו שוב — בלי חיבור מחדש.",
+                }
+            return {"ok": False, "error": text[:400]}
 
 
 def _extract_addr(from_raw: str) -> str:
