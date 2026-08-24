@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import ssl
 import threading
@@ -540,24 +541,88 @@ def _il_now() -> datetime:
     return datetime.now(timezone.utc).astimezone(IL)
 
 
+def _scheduler_enabled() -> bool:
+    """Only the server (Docker binds 0.0.0.0) sends 10:00 pings and runs daily research."""
+    host = (os.environ.get("BEO_CONTROL_HOST") or "127.0.0.1").strip()
+    return host in {"0.0.0.0", "::"}
+
+
+def _il_workday(now: datetime) -> bool:
+    # Israel work week: Sunday–Thursday.
+    return now.weekday() in {6, 0, 1, 2, 3}
+
+
+_research_lock = threading.Lock()
+
+
+def _run_daily_bg() -> None:
+    try:
+        from leads_research import run_daily
+
+        run_daily(target=10)
+    except Exception:
+        _log("daily research failed")
+    state = _state()
+    state["research_done"] = today_il()
+    _save_state(state)
+
+
 def _maybe_schedule() -> None:
-    if not _token() or not _or_chat():
+    if not _token() or not _or_chat() or not _scheduler_enabled():
         return
     now = _il_now()
     day = today_il()
     state = _state()
+
+    if (
+        _il_workday(now)
+        and 7 <= now.hour < 10
+        and state.get("research_on") != day
+        and leads_is_on()
+    ):
+        with _research_lock:
+            state = _state()
+            if state.get("research_on") != day:
+                state["research_on"] = day
+                _save_state(state)
+                if pending_today_count() < 10:
+                    threading.Thread(
+                        target=_run_daily_bg, name="leads-daily", daemon=True
+                    ).start()
+                else:
+                    state["research_done"] = day
+                    _save_state(state)
+
     if pending_today_count() >= 10:
         notify_ten_ready()
+
+    state = _state()
     if now.hour == 10 and state.get("morning_on") != day:
-        if state.get("pending10_on") != day:
-            n = pending_today_count()
+        n = pending_today_count()
+        already = state.get("pending10_on") == day
+        researching = (
+            state.get("research_on") == day and state.get("research_done") != day
+        )
+        if already:
+            pass
+        elif researching:
+            pass
+        elif n >= 10:
+            notify_ten_ready()
+        elif n > 0:
             notify_or(
                 f"בוקר.\n\nיש {n} טיוטות מוכנות היום (יעד 10).\n"
-                "אפשר לשאול אותי על כל אחת."
+                "אישור ושליחה רק ב-Beo OS."
+            )
+        else:
+            notify_or(
+                "בוקר.\n\nאין טיוטות מוכנות היום.\n"
+                "אפשר להריץ מחקר יומי מלוח Beo Leads."
             )
         state = _state()
         state["morning_on"] = day
         _save_state(state)
+    state = _state()
     if now.hour >= 17 and now.hour < 20 and state.get("eod_on") != day:
         notify_or(eod_text())
         state = _state()
