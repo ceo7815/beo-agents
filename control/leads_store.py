@@ -151,7 +151,7 @@ def overview() -> dict[str, Any]:
     return {
         "ok": True,
         "date": day,
-        "target_ready_by": "10:00",
+        "target_ready_by": "17:00",
         "daily_target": 10,
         "score_floor": 72,
         "checked_today": count(

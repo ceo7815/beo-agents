@@ -15,6 +15,7 @@ from leads_store import (
     overview,
     pipeline,
     set_status,
+    today_il,
 )
 from leads_research import redraft_pending, run_daily
 from leads_learn import extract_copy_features, infer_vertical, learn, public_state
@@ -281,7 +282,23 @@ def handle_post(path: str, raw: bytes) -> tuple[int, dict[str, Any]]:
             return 200, {"ok": False, "error": "שי כבוי — הפעילו את הסוכן מהלוח"}
         target = int(body.get("target") or 10)
         target = min(max(target, 1), 10)
-        return 200, run_daily(target=target)
+        start_wave = 0
+        try:
+            from leads_telegram import _save_state, _state
+
+            state = _state()
+            if state.get("research_day") == today_il() or state.get("research_on") == today_il():
+                start_wave = int(state.get("research_wave") or 0)
+            result = run_daily(target=target, start_wave=start_wave)
+            state = _state()
+            state["research_wave"] = int(result.get("next_wave") or start_wave)
+            state["research_on"] = today_il()
+            if result.get("target_met"):
+                state["research_done"] = today_il()
+            _save_state(state)
+        except Exception:
+            result = run_daily(target=target)
+        return 200, result
     if clean == "/api/leads/redraft":
         return 200, redraft_pending()
     if clean == "/api/leads/check-replies":

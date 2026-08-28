@@ -6,6 +6,8 @@ import html as html_lib
 import json
 import re
 import ssl
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +17,7 @@ from urllib.parse import urljoin, urlparse
 from leads_store import (
     _env_value,
     _now,
+    get_item,
     gmail_connected,
     known_domains,
     pending_today_count,
@@ -28,16 +31,20 @@ from leads_learn import (
     ranked_vertical_keys,
     vertical_icp_boost,
 )
+from leads_seeds import EXTRA_QUERIES, SEED_URLS, city_queries
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
-TIMEOUT = 18
+TIMEOUT = 10
 DAILY_TARGET = 10
 SCORE_FLOOR = 72
-MAX_SEARCH = 36
+FILL_FLOOR = 60
+MAX_SEARCH = 80
+WAVE_SECONDS = 11 * 60
 CTX = ssl.create_default_context()
+_RUN_LOCK = threading.Lock()
 
 BEO_SERVICES = [
     "אפליקציות ואתרים",
@@ -57,7 +64,7 @@ QUERIES = [
     ("משרד תיווך בוטיק ישראל", "realestate"),
     ("קליניקה לאסתטיקה רפואית ישראל", "clinics"),
     ("יועץ משכנתאות משרד ישראל", "mortgage"),
-]
+] + list(EXTRA_QUERIES)
 
 EMAIL_RE = re.compile(
     r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}",
@@ -93,12 +100,17 @@ CONTACT_PATHS = (
     "/he/contact",
     "/%D7%A6%D7%95%D7%A8-%D7%A7%D7%A9%D7%A8",
     "/צור-קשר",
+    "/he/צור-קשר",
+    "/contacts",
+    "/contact.html",
     "/about",
     "/about-us",
     "/he",
     "/%D7%90%D7%95%D7%93%D7%95%D7%AA",
     "/אודות",
     "/our-story",
+    "/privacy",
+    "/privacy-policy",
 )
 
 
@@ -131,35 +143,23 @@ BAD_HOSTS = (
     "linkedin.",
     "wikipedia.",
     "wix.com",
+    "yad2.",
+    "leumi.co.il",
+    "hapoalim.co.il",
+    "mizrahi-tefahot.co.il",
+    "discountbank.co.il",
+    "harel-group.",
+    "migdal.co.il",
+    "clalbit.co.il",
+    "phoenix.co.il",
+    "menora.co.il",
+    "osem.co.il",
+    "strauss-group.",
+    "tnuva.co.il",
+    "azrieli.",
+    "remax-",
+    "anglo-saxon.",
 )
-
-# Israeli professional firms with public sites — used when search engines block bots.
-SEED_URLS = [
-    "https://www.sides-ins.co.il/",
-    "https://ramib.co.il/",
-    "https://www.manor.co.il/",
-    "https://rotlevins.co.il/",
-    "https://www.danbit.co.il/",
-    "https://livshalom.co.il/",
-    "https://www.shaldan.co.il/",
-    "https://www.notaly.co.il/",
-    "https://oig.co.il/",
-    "https://as-titanum.com/",
-    "https://www.h-cohen.co.il/",
-    "https://segalovich.co.il/",
-    "https://www.kaplan-re.co.il/",
-    "https://www.gaiahome.co.il/",
-    "https://duoo.co.il/",
-    "https://b-n.co.il/",
-    "https://drhightune.co.il/",
-    "https://drchenshevel.co.il/",
-    "https://drmosherosen.co.il/",
-    "https://aby.clinic/",
-    "https://mpersonal.co.il/",
-    "https://my-mashkanta.co.il/",
-    "https://www.visman.co.il/",
-    "https://eliyau-mortgage.co.il/",
-]
 
 SITE_URL = "https://beosystem.com"
 INTRO_LINE = "כאן שי מ-Beo Systems."
@@ -224,7 +224,7 @@ def _ddg_urls(query: str, limit: int = 8) -> list[str]:
     q = urllib.parse.urlencode({"q": query})
     found = _search_page_urls(f"https://lite.duckduckgo.com/lite/?{q}", limit)
     if len(found) >= 3:
-        return found
+        return found[:limit]
     more = _search_page_urls(f"https://html.duckduckgo.com/html/?{q}", limit)
     for href in more:
         if href not in found:
@@ -238,15 +238,17 @@ def _ddg_urls(query: str, limit: int = 8) -> list[str]:
     for href in bing:
         if href not in found:
             found.append(href)
+    if len(found) >= 3:
+        return found[:limit]
+    brave_q = urllib.parse.urlencode({"q": query})
+    brave = _search_page_urls(f"https://search.brave.com/search?{brave_q}", limit)
+    for href in brave:
+        if href not in found:
+            found.append(href)
     return found[:limit]
 
 
-def collect_candidate_urls(limit: int = MAX_SEARCH) -> tuple[list[str], str]:
-    """Search engines first; Israeli seed list if they block bots.
-    Query order follows what converted, with a slice kept for exploration."""
-    urls: list[str] = []
-    source = "search"
-    first_empty = False
+def _ordered_queries() -> list[str]:
     keys = ranked_vertical_keys([v for _, v in QUERIES])
     ordered: list[str] = []
     for key in keys:
@@ -256,21 +258,51 @@ def collect_candidate_urls(limit: int = MAX_SEARCH) -> tuple[list[str], str]:
     for query, vert in QUERIES:
         if query not in ordered:
             ordered.append(query)
-    for i, query in enumerate(ordered):
-        batch = _ddg_urls(query, limit=6)
-        if i == 0 and not batch:
-            first_empty = True
-            break
-        for href in batch:
-            if href not in urls:
-                urls.append(href)
-        if len(urls) >= limit:
-            return urls[:limit], source
-    if first_empty or len(urls) < 5:
+    for query, _vert in city_queries():
+        if query not in ordered:
+            ordered.append(query)
+    return ordered
+
+
+def collect_candidate_urls(
+    limit: int = MAX_SEARCH,
+    wave: int = 0,
+    exclude: set[str] | None = None,
+) -> tuple[list[str], str]:
+    """Search first; seeds if engines return almost nothing. Each wave uses a new query slice."""
+    skip = exclude or set()
+    urls: list[str] = []
+    source = "search"
+    queries = _ordered_queries()
+    chunk = 8
+    start = wave * chunk
+    slice_q = queries[start : start + chunk]
+    if not slice_q:
         source = "seeds"
         for href in SEED_URLS:
-            if href not in urls:
+            host = _domain(href)
+            if host and host not in skip and href not in urls:
                 urls.append(href)
+            if len(urls) >= limit:
+                break
+        return urls[:limit], source
+    for query in slice_q:
+        batch = _ddg_urls(query, limit=6)
+        for href in batch:
+            host = _domain(href)
+            if not host or host in skip or href in urls:
+                continue
+            urls.append(href)
+        if len(urls) >= limit:
+            return urls[:limit], source
+    if len(urls) < 4:
+        source = "seeds"
+        for href in SEED_URLS:
+            host = _domain(href)
+            if host and host not in skip and href not in urls:
+                urls.append(href)
+            if len(urls) >= limit:
+                break
     return urls[:limit], source
 
 
@@ -290,6 +322,41 @@ def _unglue_email(email: str) -> str:
     if not local:
         return email
     return f"{local}@{host}"
+
+
+def _decode_cfemail(hexstr: str) -> str:
+    try:
+        data = bytes.fromhex(hexstr)
+    except ValueError:
+        return ""
+    if len(data) < 2:
+        return ""
+    key = data[0]
+    try:
+        return bytes(b ^ key for b in data[1:]).decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
+
+
+def _emails_from_html(page: str) -> list[str]:
+    found = EMAIL_RE.findall(page)
+    for mail in re.findall(r"mailto:([^\"'\s?]+)", page, re.I):
+        found.append(urllib.parse.unquote(mail))
+    for encoded in re.findall(r"data-cfemail=[\"']([0-9a-f]+)[\"']", page, re.I):
+        decoded = _decode_cfemail(encoded)
+        if decoded:
+            found.append(decoded)
+    for encoded in re.findall(r"email-protection#([0-9a-f]+)", page, re.I):
+        decoded = _decode_cfemail(encoded)
+        if decoded:
+            found.append(decoded)
+    for local, host in re.findall(
+        r"([A-Z0-9._%+\-]+)\s*(?:\[at\]|\(at\)|\s+at\s+|\[@\])\s*([A-Z0-9.\-]+\.[A-Z]{2,})",
+        page,
+        re.I,
+    ):
+        found.append(f"{local}@{host}")
+    return found
 
 
 def _clean_emails(found: list[str], domain: str) -> list[str]:
@@ -409,9 +476,7 @@ def scrape_site(url: str) -> dict[str, Any]:
         for candidate in (_og_site_name(page), _h1(page), _title(page)):
             if candidate and candidate not in names:
                 names.append(candidate)
-        emails.extend(EMAIL_RE.findall(page))
-        for mail in re.findall(r"mailto:([^\"'\s?]+)", page, re.I):
-            emails.append(urllib.parse.unquote(mail))
+        emails.extend(_emails_from_html(page))
         if _clean_emails(emails, domain):
             break
     cleaned = _clean_emails(emails, domain)
@@ -609,6 +674,8 @@ def _detect_vertical(page_text: str) -> dict[str, Any]:
 def _too_big(page_text: str, company: str) -> str | None:
     blob = f"{company} {page_text}"
     t = blob.lower()
+    if re.search(r"(בנק לאומי|בנק הפועלים|בנק דיסקונט|מזרחי טפחות)", blob):
+        return "בנק — לא יעד של שי"
     if any(
         p in t
         for p in (
@@ -1019,6 +1086,7 @@ def _item_from_scrape(scrape: dict[str, Any], status: str) -> dict[str, Any]:
         )
     else:
         features = {}
+    keep_score = status in {"pending_approval", "skipped_low_score"}
     return {
         "id": "",
         "company": company,
@@ -1028,13 +1096,13 @@ def _item_from_scrape(scrape: dict[str, Any], status: str) -> dict[str, Any]:
         "email": scrape.get("email"),
         "phone": scrape.get("phone") or "",
         "owner_name": owner if status == "pending_approval" else "",
-        "vertical_key": str(scored["vertical"]["key"]) if status == "pending_approval" else "",
+        "vertical_key": str(scored["vertical"]["key"]) if keep_score else "",
         "copy_features": features,
-        "score": scored["score"] if status == "pending_approval" else 0,
-        "score_parts": scored["score_parts"] if status == "pending_approval" else {},
-        "score_why": why if status == "pending_approval" else "",
+        "score": scored["score"] if keep_score else 0,
+        "score_parts": scored["score_parts"] if keep_score else {},
+        "score_why": why if keep_score else "",
         "site_hook": hook if status == "pending_approval" else "",
-        "service": scored["service"] if status == "pending_approval" else "",
+        "service": scored["service"] if keep_score else "",
         "draft_source": draft_source,
         "status": status,
         "skip_reason": (
@@ -1116,20 +1184,158 @@ def redraft_pending() -> dict[str, Any]:
     }
 
 
-def run_daily(target: int = DAILY_TARGET) -> dict[str, Any]:
-    """Research until `target` pending drafts for today, or search budget ends."""
+def _consider_scrape(
+    scrape: dict[str, Any],
+    *,
+    existing_id: str | None = None,
+    floor: int = SCORE_FLOOR,
+) -> str:
+    """Save one site. Returns pending / skipped / error."""
+    company = _clean_company(str(scrape.get("company") or ""), str(scrape.get("domain") or ""))
+    if not scrape.get("email"):
+        item = _item_from_scrape(scrape, "skipped_no_email")
+        if existing_id:
+            item["id"] = existing_id
+            prev = get_item(existing_id) or {}
+            item["created_at"] = prev.get("created_at") or item.get("created_at")
+            item["email_retried"] = True
+        item["skip_reason"] = "אין מייל גלוי באתר"
+        save_item(item)
+        return "skipped"
+    big = _too_big(scrape.get("page_text") or "", company)
+    if big:
+        item = _item_from_scrape(scrape, "skipped_too_big")
+        if existing_id:
+            item["id"] = existing_id
+        item["skip_reason"] = big
+        save_item(item)
+        return "skipped"
+    scored = _compose_score(scrape.get("page_text") or "", scrape.get("email"), company)
+    score = int(scored.get("score") or 0)
+    if score < floor:
+        item = _item_from_scrape(scrape, "skipped_low_score")
+        if existing_id:
+            item["id"] = existing_id
+        item["skip_reason"] = f"ציון {score} מתחת לסף {SCORE_FLOOR}"
+        item["email_subject"] = ""
+        item["email_subject_b"] = ""
+        item["email_body"] = ""
+        save_item(item)
+        return "skipped"
+    item = _item_from_scrape(scrape, "pending_approval")
+    if existing_id:
+        prev = get_item(existing_id) or {}
+        item["id"] = existing_id
+        item["created_at"] = prev.get("created_at") or item.get("created_at")
+    item["status"] = "pending_approval"
+    item["skip_reason"] = None
+    item["batch_date"] = today_il()
+    save_item(item)
+    return "pending"
+
+
+def _retry_no_email(need: int, errors: list[str]) -> tuple[int, int]:
+    added = 0
+    checked = 0
+    rows = pipeline().get("items") or []
+    for row in rows:
+        if added >= need:
+            break
+        if row.get("status") != "skipped_no_email":
+            continue
+        if row.get("email_retried"):
+            continue
+        website = str(row.get("website") or "")
+        if not website:
+            continue
+        checked += 1
+        try:
+            scrape = scrape_site(website)
+        except Exception as exc:
+            errors.append(f"{row.get('domain')}: {exc}")
+            row["email_retried"] = True
+            save_item(row)
+            continue
+        result = _consider_scrape(scrape, existing_id=str(row.get("id") or ""), floor=SCORE_FLOOR)
+        if result == "pending":
+            added += 1
+        else:
+            marked = get_item(str(row.get("id") or "")) or row
+            marked["email_retried"] = True
+            save_item(marked)
+    return added, checked
+
+
+def _fill_from_low_score(need: int) -> int:
+    """If still short of 10, promote the best skipped drafts that still have a public email."""
+    if need <= 0:
+        return 0
+    rows = []
+    for r in pipeline().get("items") or []:
+        if r.get("status") != "skipped_low_score" or not r.get("email"):
+            continue
+        if str(r.get("vertical_key") or "") == "generic":
+            continue
+        score = int(r.get("score") or 0)
+        if score and score < FILL_FLOOR:
+            continue
+        rows.append(r)
+    rows.sort(key=lambda r: int(r.get("score") or 0), reverse=True)
+    added = 0
+    for row in rows:
+        if added >= need:
+            break
+        website = str(row.get("website") or "")
+        if not website:
+            continue
+        try:
+            scrape = scrape_site(website)
+            if row.get("email") and not scrape.get("email"):
+                scrape["email"] = row.get("email")
+        except Exception:
+            continue
+        result = _consider_scrape(
+            scrape,
+            existing_id=str(row.get("id") or ""),
+            floor=FILL_FLOOR,
+        )
+        if result == "pending":
+            added += 1
+    return added
+
+
+def run_daily(target: int = DAILY_TARGET, start_wave: int = 0) -> dict[str, Any]:
+    """Keep hunting until `target` pending drafts today. Scheduler calls again if still short."""
+    if not _RUN_LOCK.acquire(blocking=False):
+        return {
+            "ok": True,
+            "message": "מחקר כבר רץ",
+            "added_pending": 0,
+            "skipped": 0,
+            "checked": 0,
+            "pending_today": pending_today_count(),
+            "next_wave": start_wave,
+        }
+    try:
+        return _run_daily_locked(target, start_wave=start_wave)
+    finally:
+        _RUN_LOCK.release()
+
+
+def _run_daily_locked(target: int, start_wave: int = 0) -> dict[str, Any]:
     try:
         from leads_learn import learn as _learn
 
         _learn(with_llm=False)
     except Exception:
         pass
-    need = max(0, target - pending_today_count())
+    need = max(0, min(target, DAILY_TARGET) - pending_today_count())
     seen = known_domains()
     added_pending = 0
     skipped = 0
     checked = 0
     errors: list[str] = []
+    sources: list[str] = []
     if need <= 0:
         try:
             from leads_telegram import notify_ten_ready
@@ -1143,59 +1349,62 @@ def run_daily(target: int = DAILY_TARGET) -> dict[str, Any]:
             "added_pending": 0,
             "skipped": 0,
             "checked": 0,
+            "pending_today": pending_today_count(),
+            "next_wave": start_wave,
+            "target_met": True,
         }
 
-    urls, source = collect_candidate_urls(MAX_SEARCH)
-    if source == "seeds":
-        errors.append("מנוע חיפוש חסם בוטים — סורקים רשימת עסקים בינוניים מוכנים")
+    deadline = time.monotonic() + WAVE_SECONDS
+    wave = max(0, int(start_wave or 0))
+    while added_pending < need and wave < 24 and time.monotonic() < deadline:
+        urls, source = collect_candidate_urls(MAX_SEARCH, wave=wave, exclude=seen)
+        if source not in sources:
+            sources.append(source)
+        if source == "seeds" and wave == 0:
+            errors.append("מנוע חיפוש חסם בוטים — ממשיכים מרשימת עסקים ומגלים נוספים")
+        for url in urls:
+            if added_pending >= need or time.monotonic() >= deadline:
+                break
+            domain = _domain(url)
+            if not domain or domain in seen or domain in SKIP_DOMAINS:
+                continue
+            seen.add(domain)
+            checked += 1
+            try:
+                scrape = scrape_site(url)
+            except Exception as exc:
+                errors.append(f"{domain}: {exc}")
+                continue
+            seen.add(scrape["domain"])
+            result = _consider_scrape(scrape)
+            if result == "pending":
+                added_pending += 1
+            else:
+                skipped += 1
+        wave += 1
 
-    for url in urls:
-        if added_pending >= need:
-            break
-        domain = _domain(url)
-        if not domain or domain in seen or domain in SKIP_DOMAINS:
-            continue
-        seen.add(domain)
-        checked += 1
-        try:
-            scrape = scrape_site(url)
-        except Exception as exc:
-            errors.append(f"{domain}: {exc}")
-            continue
-        seen.add(scrape["domain"])
-        if not scrape.get("email"):
-            item = _item_from_scrape(scrape, "skipped_no_email")
-            item["skip_reason"] = "אין מייל גלוי באתר"
-            save_item(item)
-            skipped += 1
-            continue
-        big = _too_big(scrape.get("page_text") or "", scrape.get("company") or "")
-        if big:
-            item = _item_from_scrape(scrape, "skipped_too_big")
-            item["skip_reason"] = big
-            save_item(item)
-            skipped += 1
-            continue
-        item = _item_from_scrape(scrape, "pending_approval")
-        if int(item.get("score") or 0) < SCORE_FLOOR:
-            item["status"] = "skipped_low_score"
-            item["skip_reason"] = f"ציון {item.get('score')} מתחת לסף {SCORE_FLOOR}"
-            item["email_subject"] = ""
-            item["email_subject_b"] = ""
-            item["email_body"] = ""
-            save_item(item)
-            skipped += 1
-            continue
-        save_item(item)
-        added_pending += 1
+    if added_pending < need and time.monotonic() < deadline:
+        retry_added, retry_checked = _retry_no_email(need - added_pending, errors)
+        added_pending += retry_added
+        checked += retry_checked
 
+    filled = 0
+    if added_pending < need:
+        filled = _fill_from_low_score(need - added_pending)
+        added_pending += filled
+
+    pending_now = pending_today_count()
     msg = f"נוספו {added_pending} טיוטות לאישור"
-    if source == "seeds" and added_pending:
-        msg += " (חיפוש נחסם — מאתרים ישראלים מוכנים)"
+    if filled:
+        msg += f" (כולל {filled} מהציון {FILL_FLOOR}+ להשלמת היום)"
+    if "seeds" in sources and added_pending:
+        msg += " · חלק מאתרים ישראלים מוכנים"
     if added_pending == 0 and skipped:
-        msg = f"נבדקו אתרים, {skipped} דולגו (אין מייל, גדול מדי או ציון נמוך)"
+        msg = f"נבדקו אתרים, {skipped} דולגו (אין מייל, גדול מדי או ציון נמוך) — ממשיכים לחפש"
     elif added_pending == 0:
-        msg = "לא נמצאו אתרים לסריקה"
+        msg = "לא נמצאו אתרים לסריקה — ננסה שוב עד סוף יום העבודה"
+    if pending_now < DAILY_TARGET:
+        msg += f". יש {pending_now}/{DAILY_TARGET} להיום — שי ממשיך עד עשר."
     try:
         from leads_telegram import notify_ten_ready
 
@@ -1208,9 +1417,11 @@ def run_daily(target: int = DAILY_TARGET) -> dict[str, Any]:
         "added_pending": added_pending,
         "skipped": skipped,
         "checked": checked,
-        "pending_today": pending_today_count(),
-        "search_source": source,
+        "pending_today": pending_now,
+        "search_source": sources[0] if sources else "search",
         "score_floor": SCORE_FLOOR,
         "errors": errors[:8],
         "gmail_connected": gmail_connected(),
+        "target_met": pending_now >= DAILY_TARGET,
+        "next_wave": wave,
     }

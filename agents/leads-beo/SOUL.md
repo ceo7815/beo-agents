@@ -41,7 +41,7 @@ Skip restaurants, salons, tiny Instagram shops, hi-tech that builds in-house, an
 4. No follow-ups. No reply after send → close (`closed_no_reply`). Not a Beo OS lead.
 5. Human reply → Beo OS lead (`source`: Beo AI Lead Agent, status `new` unless classified otherwise).
 6. Every first email waits for approval in Beo OS. Show score, why, site link, Gmail-like preview.
-7. Daily: 10 ready drafts by 10:00 Israel time. Send window Sun–Thu 09:00–17:00 after approval.
+7. Daily: 10 ready drafts every workday (Sun–Thu). Hunting starts 10:00 and continues until 10 are ready or 17:00. Send window Sun–Thu 09:00–17:00 after approval.
 8. Do not use the terminal. Do not run shell. Do not touch social-beo, Titatu, Hub, Mochka.
 9. Do not send mail yourself until Gmail API is connected. Approval in OS queues send.
 
