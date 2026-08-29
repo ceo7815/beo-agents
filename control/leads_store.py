@@ -125,12 +125,18 @@ def known_domains() -> set[str]:
 
 
 def pending_today_count() -> int:
+    """First-touch drafts today. Follow-ups do not count toward the daily hunt of 10."""
     day = today_il()
     with LOCK:
         n = 0
         for row in _read().get("items") or []:
-            if row.get("status") == "pending_approval" and str(row.get("batch_date") or "") == day:
-                n += 1
+            if row.get("status") != "pending_approval":
+                continue
+            if str(row.get("batch_date") or "") != day:
+                continue
+            if str(row.get("draft_kind") or "first") == "followup":
+                continue
+            n += 1
         return n
 
 
@@ -167,7 +173,19 @@ def overview() -> dict[str, Any]:
         ),
         "skipped_today": count("skipped_no_email", "skipped_too_big", "skipped_low_score", today=True),
         "pending_approval": count("pending_approval"),
-        "pending_today": count("pending_approval", today=True),
+        "pending_today": sum(
+            1
+            for row in items
+            if row.get("status") == "pending_approval"
+            and str(row.get("batch_date") or "") == day
+            and str(row.get("draft_kind") or "first") != "followup"
+        ),
+        "followups_pending": sum(
+            1
+            for row in items
+            if row.get("status") == "pending_approval"
+            and str(row.get("draft_kind") or "") == "followup"
+        ),
         "sent_today": count("sent", today=True),
         "replied": count("replied"),
         "bounced": count("bounced"),

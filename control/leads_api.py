@@ -19,7 +19,7 @@ from leads_store import (
 )
 from leads_research import redraft_pending, run_daily
 from leads_learn import extract_copy_features, infer_vertical, learn, public_state
-from gmail_client import find_inbox_replies, send_mail, sent_by_recipient, token_present
+from gmail_client import find_inbox_replies, message_rfc822_id, send_mail, sent_by_recipient, token_present
 
 
 def _learn_quiet(*, with_llm: bool = False) -> None:
@@ -83,6 +83,7 @@ def ingest_replies() -> dict[str, Any]:
             set_status(hit["item_id"], "bounced", extra)
             bounced += 1
             _notify_reply(hit["item_id"], "bounced")
+            _cancel_followups(hit["item_id"], "נסגר — כתובת לא נכונה")
             continue
         if status != "sent":
             continue
@@ -99,11 +100,13 @@ def ingest_replies() -> dict[str, Any]:
             set_status(hit["item_id"], "replied", extra)
             not_interested += 1
             _notify_reply(hit["item_id"], "not_interested")
+            _cancel_followups(hit["item_id"], "נסגר — ענו שלא מעוניינים")
             continue
         extra["status_note"] = "תשובה אנושית — כרטיס בדף לידים"
         set_status(hit["item_id"], "replied", extra)
         new_ids.append(hit["item_id"])
         _notify_reply(hit["item_id"], "human")
+        _cancel_followups(hit["item_id"], "נסגר — כבר ענו")
     os_items = _pending_os_lead_rows()
     out = {
         "ok": True,
@@ -116,6 +119,15 @@ def ingest_replies() -> dict[str, Any]:
     }
     _learn_quiet(with_llm=bool(new_ids))
     return out
+
+
+def _cancel_followups(parent_id: str, note: str) -> None:
+    try:
+        from leads_outreach import cancel_open_followups
+
+        cancel_open_followups(parent_id, note)
+    except Exception:
+        pass
 
 
 def _read_json(raw: bytes) -> dict[str, Any]:
@@ -144,6 +156,8 @@ def reconcile_sent() -> None:
     if not sent:
         return
     for row in waiting:
+        if str(row.get("draft_kind") or "first") == "followup":
+            continue
         email = str(row.get("email") or "").strip().lower()
         hit = sent.get(email)
         if not hit:
@@ -179,6 +193,14 @@ def _approve_item(item_id: str, row: dict[str, Any], body: dict[str, Any]) -> tu
         extra["email_subject"] = str(body.get("email_subject") or "")
     if "email_body" in body:
         extra["email_body"] = str(body.get("email_body") or "")
+    if "whatsapp_body" in body:
+        extra["whatsapp_body"] = str(body.get("whatsapp_body") or "")
+        from leads_outreach import wa_me_url
+
+        extra["whatsapp_to_url"] = wa_me_url(
+            str(row.get("phone") or ""),
+            extra["whatsapp_body"],
+        )
     subject = str(extra.get("email_subject") or row.get("email_subject") or "")
     mail_body = str(extra.get("email_body") or row.get("email_body") or "")
     extra["status_note"] = "אושר · שולח מ-Gmail…"
@@ -191,6 +213,14 @@ def _approve_item(item_id: str, row: dict[str, Any], body: dict[str, Any]) -> tu
         result = set_status(item_id, "approved", extra)
         return (200, result) if result.get("ok") else (400, result)
 
+    thread_id = ""
+    in_reply_to = ""
+    if str(row.get("draft_kind") or "first") == "followup":
+        thread_id = str(row.get("gmail_thread_id") or "")
+        parent_gid = str(row.get("parent_gmail_id") or "")
+        if parent_gid:
+            in_reply_to = message_rfc822_id(parent_gid)
+
     try:
         sent = send_mail(
             to_email=str(row.get("email") or ""),
@@ -198,6 +228,8 @@ def _approve_item(item_id: str, row: dict[str, Any], body: dict[str, Any]) -> tu
             body=mail_body,
             from_email=str(row.get("from_email") or "sales@beosystem.com"),
             from_name=str(row.get("from_name") or "שי | Beo Systems"),
+            thread_id=thread_id,
+            in_reply_to=in_reply_to,
         )
     except Exception as exc:
         extra["status_note"] = str(exc)[:400]
@@ -298,7 +330,22 @@ def handle_post(path: str, raw: bytes) -> tuple[int, dict[str, Any]]:
             _save_state(state)
         except Exception:
             result = run_daily(target=target)
+        try:
+            from leads_outreach import queue_followups
+
+            fu = queue_followups()
+            if isinstance(result, dict):
+                result["followups_queued"] = fu.get("queued") or 0
+        except Exception:
+            pass
         return 200, result
+    if clean == "/api/leads/queue-followups":
+        from power import leads_is_on
+        from leads_outreach import queue_followups
+
+        if not leads_is_on():
+            return 200, {"ok": False, "error": "שי כבוי — הפעילו את הסוכן מהלוח"}
+        return 200, queue_followups()
     if clean == "/api/leads/redraft":
         return 200, redraft_pending()
     if clean == "/api/leads/check-replies":
@@ -332,6 +379,14 @@ def handle_post(path: str, raw: bytes) -> tuple[int, dict[str, Any]]:
                 extra["email_subject"] = str(body.get("email_subject") or "")
             if "email_body" in body:
                 extra["email_body"] = str(body.get("email_body") or "")
+            if "whatsapp_body" in body:
+                extra["whatsapp_body"] = str(body.get("whatsapp_body") or "")
+                from leads_outreach import wa_me_url
+
+                extra["whatsapp_to_url"] = wa_me_url(
+                    str(row.get("phone") or ""),
+                    extra["whatsapp_body"],
+                )
             if "os_lead_created" in body:
                 extra["os_lead_created"] = bool(body.get("os_lead_created"))
             if row.get("status") != "pending_approval":

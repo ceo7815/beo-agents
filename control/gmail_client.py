@@ -304,6 +304,8 @@ def send_mail(
     body: str,
     from_email: str,
     from_name: str,
+    thread_id: str = "",
+    in_reply_to: str = "",
 ) -> dict[str, Any]:
     to_email = (to_email or "").strip()
     if not to_email or "@" not in to_email:
@@ -346,13 +348,19 @@ def send_mail(
             msg["To"] = to_email
             msg["From"] = f"{from_name} <{from_email}>"
             msg["Subject"] = subject or "(ללא נושא)"
+            if in_reply_to:
+                msg["In-Reply-To"] = in_reply_to
+                msg["References"] = in_reply_to
             msg.set_content(text, charset="utf-8")
             msg.add_alternative(html, subtype="html", charset="utf-8")
             raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+            payload: dict[str, Any] = {"raw": raw}
+            if thread_id:
+                payload["threadId"] = thread_id
             sent = (
                 service.users()
                 .messages()
-                .send(userId="me", body={"raw": raw})
+                .send(userId="me", body=payload)
                 .execute()
             )
             return {
@@ -368,6 +376,34 @@ def send_mail(
                     "error": "Gmail דחה הרשאה ישנה. רעננו ושלחו שוב — בלי חיבור מחדש.",
                 }
             return {"ok": False, "error": text[:400]}
+
+
+def message_rfc822_id(gmail_id: str) -> str:
+    gid = (gmail_id or "").strip()
+    if not gid:
+        return ""
+    with GMAIL_LOCK:
+        try:
+            service = _gmail_service()
+            if service is None:
+                return ""
+            msg = (
+                service.users()
+                .messages()
+                .get(
+                    userId="me",
+                    id=gid,
+                    format="metadata",
+                    metadataHeaders=["Message-ID"],
+                )
+                .execute()
+            )
+        except Exception:
+            return ""
+    for header in (msg.get("payload") or {}).get("headers") or []:
+        if str(header.get("name") or "").lower() == "message-id":
+            return str(header.get("value") or "").strip()
+    return ""
 
 
 def _extract_addr(from_raw: str) -> str:

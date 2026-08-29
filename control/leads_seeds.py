@@ -51,6 +51,10 @@ EXTRA_QUERIES = (
     ("חברה משפחתית יבוא סיטונאות ישראל", "import"),
     ("סיטונאות מזון משפחתית ישראל", "import"),
     ("מפיץ חומרי בניין משפחתי ישראל", "import"),
+    ("סוכנות ביטוח דרושים רכז לידים", "insurance"),
+    ("משרד תיווך דרושים מזכירה", "realestate"),
+    ("קליניקה אסתטיקה דרושים רכזת", "clinics"),
+    ("יועץ משכנתאות דרושים", "mortgage"),
 )
 
 # Boutique / owner-operated sites. Giants are listed in SKIP_HOSTS in research.

@@ -54,6 +54,15 @@ def _tick() -> None:
     if not leads_is_on() or not workday:
         return
 
+    try:
+        from leads_outreach import queue_followups
+
+        fu = queue_followups()
+        if int(fu.get("queued") or 0):
+            _log(f"followups queued {fu.get('queued')}")
+    except Exception:
+        _log("followup queue failed")
+
     n = pending_today_count()
     if n >= DAILY_TARGET:
         state = _state()

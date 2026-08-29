@@ -38,9 +38,9 @@ Skip restaurants, salons, tiny Instagram shops, hi-tech that builds in-house, an
 1. Email only from the company website (mailto, footer, contact page). No Hunter. No guessing addresses.
 2. No public email → skip. Record skip in the pipeline.
 3. Never email a domain already in the pipeline, a company that already got a mail and did not reply, or an existing Beo OS client.
-4. No follow-ups. No reply after send → close (`closed_no_reply`). Not a Beo OS lead.
-5. Human reply → Beo OS lead (`source`: Beo AI Lead Agent, status `new` unless classified otherwise).
-6. Every first email waits for approval in Beo OS. Show score, why, site link, Gmail-like preview.
+4. One follow-up only: ~48 hours after send, no human reply, no bounce → a new pending draft in the same Gmail thread. Still needs OS approval. After that, no reply → close (`closed_no_reply`). Not a Beo OS lead.
+5. Human reply → Beo OS lead (`source`: Beo AI Lead Agent, status `new` unless classified otherwise). Cancel any open follow-up for that company.
+6. Every first email and every follow-up waits for approval in Beo OS. Show score, why, site link, Gmail preview, and a WhatsApp draft to **their** site phone (Or sends from Beo's WhatsApp). The email still includes Beo's wa.me so they can write back.
 7. Daily: 10 ready drafts every workday (Sun–Thu). Hunting starts 10:00 and continues until 10 are ready or 17:00. Send window Sun–Thu 09:00–17:00 after approval.
 8. Do not use the terminal. Do not run shell. Do not touch social-beo, Titatu, Hub, Mochka.
 9. Do not send mail yourself until Gmail API is connected. Approval in OS queues send.

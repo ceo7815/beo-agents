@@ -144,6 +144,12 @@ BAD_HOSTS = (
     "wikipedia.",
     "wix.com",
     "yad2.",
+    "alljobs.",
+    "drushim.",
+    "jobmaster.",
+    "jobnet.",
+    "indeed.",
+    "glassdoor.",
     "leumi.co.il",
     "hapoalim.co.il",
     "mizrahi-tefahot.co.il",
@@ -482,10 +488,9 @@ def scrape_site(url: str) -> dict[str, Any]:
     cleaned = _clean_emails(emails, domain)
     blob = " ".join(html_parts)
     text = _visible_text(blob)
-    phone_m = re.search(
-        r"(?:0(?:[2-478]|5\d)[-\s]?\d{3}[-\s]?\d{4}|\+972[-\s]?\d{1,2}[-\s]?\d{3}[-\s]?\d{4})",
-        text,
-    )
+    from leads_outreach import phones_from_html
+
+    phone = phones_from_html(blob, text)
     company = ""
     for raw in names:
         company = _clean_company(raw, domain)
@@ -496,7 +501,7 @@ def scrape_site(url: str) -> dict[str, Any]:
         "domain": domain,
         "company": company or _brand_from_domain(domain),
         "email": cleaned[0] if cleaned else None,
-        "phone": phone_m.group(0) if phone_m else "",
+        "phone": phone,
         "page_text": text,
     }
 
@@ -772,10 +777,17 @@ def _compose_score(
         "pain_fit": int(vertical["pain_fit"]),
         "contact": _contact_points(email),
     }
+    from leads_outreach import hiring_intent
+
+    hiring = hiring_intent(page_text)
+    if hiring:
+        parts["pain_fit"] = min(25, int(parts["pain_fit"]) + 6)
     total = min(100, sum(parts.values()))
     why = f"{company} — {vertical['board']}"
     if hook:
         why += f" מהאתר: «{hook}»"
+    if hiring:
+        why += " אות קנייה: מגייסים / דרושים באתר."
     if boost:
         why += f" למידה מהשוק: {boost:+d} לציון התחום."
     return {
@@ -785,6 +797,7 @@ def _compose_score(
         "service": vertical["service"],
         "vertical": vertical,
         "site_hook": hook,
+        "hiring_intent": hiring,
     }
 
 
@@ -1087,7 +1100,7 @@ def _item_from_scrape(scrape: dict[str, Any], status: str) -> dict[str, Any]:
     else:
         features = {}
     keep_score = status in {"pending_approval", "skipped_low_score"}
-    return {
+    item = {
         "id": "",
         "company": company,
         "website": scrape["website"],
@@ -1116,6 +1129,7 @@ def _item_from_scrape(scrape: dict[str, Any], status: str) -> dict[str, Any]:
         "from_name": from_name,
         "from_email": from_email,
         "whatsapp_url": whatsapp,
+        "draft_kind": "first",
         "gmail_connected": gmail_connected(),
         "created_at": _now(),
         "updated_at": _now(),
@@ -1125,6 +1139,11 @@ def _item_from_scrape(scrape: dict[str, Any], status: str) -> dict[str, Any]:
         "sent_at": None,
         "page_text": None,
     }
+    if status == "pending_approval":
+        from leads_outreach import attach_whatsapp
+
+        attach_whatsapp(item)
+    return item
 
 
 def _revive_ok(row: dict[str, Any]) -> bool:
@@ -1137,7 +1156,12 @@ def _revive_ok(row: dict[str, Any]) -> bool:
 def redraft_pending() -> dict[str, Any]:
     """Rewrite pending drafts with current copy. Does not revive rejected. Does not send mail."""
     rows = pipeline().get("items") or []
-    chosen = [row for row in rows if row.get("status") == "pending_approval"]
+    chosen = [
+        row
+        for row in rows
+        if row.get("status") == "pending_approval"
+        and str(row.get("draft_kind") or "first") != "followup"
+    ]
     updated = 0
     skipped_floor = 0
     errors: list[str] = []
