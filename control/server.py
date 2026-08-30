@@ -12,11 +12,25 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from runtime import agent_by_id, fleet, snapshot, start_agent, stop_agent
 import leads_api
+import social_api
+import johnny_api
 from leads_telegram import start_telegram_thread
 from leads_schedule import start_schedule_thread
+from social_schedule import start_social_thread
+from johnny_telegram import start_johnny_thread
 
 HOST = os.environ.get("BEO_CONTROL_HOST", "127.0.0.1")
 PORT = int(os.environ.get("BEO_CONTROL_PORT", "8788"))
+
+
+def _bytes(handler: BaseHTTPRequestHandler, code: int, payload: bytes, content_type: str) -> None:
+    handler.send_response(code)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.send_header("Cache-Control", "public, max-age=86400")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.end_headers()
+    handler.wfile.write(payload)
 
 
 def _json(handler: BaseHTTPRequestHandler, code: int, payload: dict) -> None:
@@ -74,6 +88,23 @@ class Handler(BaseHTTPRequestHandler):
                 code, payload = leads_api.handle_get(self.path)
                 _json(self, code, payload)
                 return
+            if path.startswith("/api/social/media/"):
+                from social_images import media_bytes
+
+                blob = media_bytes(path.rsplit("/", 1)[-1])
+                if not blob:
+                    _json(self, 404, {"ok": False, "error": "קובץ לא נמצא"})
+                    return
+                data, ctype = blob
+                _bytes(self, 200, data, ctype)
+                return
+            if path.startswith("/api/social"):
+                code, payload = social_api.handle_get(self.path)
+                _json(self, code, payload)
+                return
+            if path.rstrip("/") == "/api/johnny/overview" or path.startswith("/api/johnny"):
+                _json(self, 200, johnny_api.overview())
+                return
             if path.startswith("/api/agents/"):
                 agent_id = path.split("/")[-1]
                 row = agent_by_id(agent_id)
@@ -91,6 +122,10 @@ class Handler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path.rstrip("/")
             if path.startswith("/api/leads"):
                 code, payload = leads_api.handle_post(self.path, _body(self))
+                _json(self, code, payload)
+                return
+            if path.startswith("/api/social"):
+                code, payload = social_api.handle_post(self.path, _body(self))
                 _json(self, code, payload)
                 return
             parts = path.split("/")
@@ -112,6 +147,8 @@ def main() -> None:
     print(f"Beo control http://{HOST}:{PORT}", flush=True)
     start_telegram_thread()
     start_schedule_thread()
+    start_social_thread()
+    start_johnny_thread()
     httpd.serve_forever()
 
 

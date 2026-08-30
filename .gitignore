@@ -35,6 +35,10 @@ agents/*/home/performance/**
 agents/*/home/pipeline/*.json
 agents/*/home/pipeline/*.tmp
 !agents/*/home/pipeline/.gitkeep
+bundled/social-beo/home/pipeline/*.json
+bundled/social-beo/home/pipeline/*.tmp
+bundled/social-beo/home/media/**
+!bundled/social-beo/home/media/.gitkeep
 agents/*/home/telegram/**
 agents/*/home/learning/**
 !agents/*/home/learning/.gitkeep

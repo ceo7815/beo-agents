@@ -4,17 +4,31 @@
   "site": "https://beosystem.com",
   "agents": [
     {
+      "id": "johnny-beo",
+      "handle": "johnny.beo",
+      "display_name": "Beo Chief",
+      "role": "מנכ״ל דיגיטלי",
+      "purpose": "ג'וני. הסוכן הראשי — עוזר אישי של אור. טלגרם כולל קול, Beo OS מלא, Google Calendar, ceo@, חשבונית ירוקה, בוס על שי ועדי אחרי אישור בצ'אט.",
+      "status": "live",
+      "folder": "agents/johnny-beo",
+      "hermes_profile": "johnny-beo",
+      "channels": ["telegram", "beo_os"],
+      "platforms": ["gmail", "google_calendar", "green_invoice"],
+      "publish": "confirm",
+      "owner": "אור"
+    },
+    {
       "id": "social-beo",
       "handle": "social.beo",
       "display_name": "Beo Social",
       "role": "סושיאל ורשתות",
-      "purpose": "עדי. מנהלת סושיאל ורשתות חברתיות — אינסטגרם ופייסבוק. מדברים בטלגרם.",
+      "purpose": "עדי. מנהלת סושיאל — יומן ואישור ב-Beo OS, פרסום לאינסטגרם ופייסבוק, טלגרם לשיחה ועדכונים.",
       "status": "live",
       "folder": "bundled/social-beo",
       "hermes_profile": "social-beo",
-      "channels": ["telegram"],
+      "channels": ["beo_os", "telegram"],
       "platforms": ["instagram", "facebook"],
-      "publish": "preview",
+      "publish": "approval",
       "owner": "אור"
     },
     {

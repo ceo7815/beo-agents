@@ -15,7 +15,9 @@ from power import (
     docker_container_running,
     docker_start,
     docker_stop,
+    johnny_is_on,
     leads_is_on,
+    set_johnny_on,
     set_leads_on,
     social_is_running,
 )
@@ -76,14 +78,28 @@ def _env_flags(home: Path, agent_id: str) -> dict[str, bool]:
         "openai": bool((os.environ.get("OPENAI_API_KEY") or "").strip()),
         "telegram": False,
         "gmail": False,
+        "calendar": False,
+        "os": False,
+        "meta": False,
     }
     if agent_id == "leads-beo":
         flags["telegram"] = bool((os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip())
         flags["gmail"] = bool((os.environ.get("GMAIL_REFRESH_TOKEN") or "").strip())
         if (home / "secrets" / "gmail-token.json").is_file():
             flags["gmail"] = True
+    elif agent_id == "johnny-beo":
+        flags["telegram"] = bool((os.environ.get("JOHNNY_TELEGRAM_BOT_TOKEN") or "").strip())
+        flags["gmail"] = bool((os.environ.get("CEO_GMAIL_REFRESH_TOKEN") or "").strip())
+        flags["calendar"] = flags["gmail"] or (home / "secrets" / "google-token.json").is_file()
+        flags["os"] = bool((os.environ.get("BOT_API_KEY") or "").strip())
+        if (home / "secrets" / "google-token.json").is_file():
+            flags["gmail"] = True
     elif agent_id == "social-beo":
         flags["telegram"] = bool((os.environ.get("SOCIAL_TELEGRAM_BOT_TOKEN") or "").strip())
+        flags["meta"] = bool(
+            (os.environ.get("META_PAGE_ACCESS_TOKEN") or "").strip()
+            and (os.environ.get("META_PAGE_ID") or "").strip()
+        )
     path = home / ".env"
     if not path.is_file():
         return flags
@@ -91,6 +107,8 @@ def _env_flags(home: Path, agent_id: str) -> dict[str, bool]:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return flags
+    file_token = False
+    file_page = False
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -102,10 +120,21 @@ def _env_flags(home: Path, agent_id: str) -> dict[str, bool]:
             flags["openai"] = True
         if key == "TELEGRAM_BOT_TOKEN" and value:
             flags["telegram"] = True
-        if key == "SOCIAL_TELEGRAM_BOT_TOKEN" and value:
+        if key == "JOHNNY_TELEGRAM_BOT_TOKEN" and value:
             flags["telegram"] = True
+        if key == "CEO_GMAIL_REFRESH_TOKEN" and value:
+            flags["gmail"] = True
+            flags["calendar"] = True
+        if key == "BOT_API_KEY" and value:
+            flags["os"] = True
         if key == "GMAIL_REFRESH_TOKEN" and value:
             flags["gmail"] = True
+        if key == "META_PAGE_ACCESS_TOKEN" and value:
+            file_token = True
+        if key == "META_PAGE_ID" and value:
+            file_page = True
+    if agent_id == "social-beo" and file_token and file_page:
+        flags["meta"] = True
     return flags
 
 
@@ -133,6 +162,8 @@ def snapshot(row: dict[str, Any]) -> dict[str, Any]:
         running = False
     elif agent_id == "leads-beo":
         running = leads_is_on()
+    elif agent_id == "johnny-beo":
+        running = johnny_is_on()
     elif agent_id == "social-beo":
         running = social_is_running(home)
     else:
@@ -140,7 +171,7 @@ def snapshot(row: dict[str, Any]) -> dict[str, Any]:
     env = (
         _env_flags(home, agent_id)
         if live
-        else {"openai": False, "telegram": False, "gmail": False}
+        else {"openai": False, "telegram": False, "gmail": False, "meta": False}
     )
     publish = str(row.get("publish") or "preview")
     if agent_id == "leads-beo":
@@ -153,19 +184,31 @@ def snapshot(row: dict[str, Any]) -> dict[str, Any]:
             {"kind": "openai", "label": "OpenAI", "connected": env["openai"]},
             {"kind": "gmail", "label": "Gmail API", "connected": env["gmail"]},
         ]
+    elif agent_id == "johnny-beo":
+        connections = [
+            {"kind": "telegram", "label": "טלגרם (שיחה + קול)", "connected": env["telegram"]},
+            {"kind": "openai", "label": "OpenAI", "connected": env["openai"]},
+            {"kind": "beo_os", "label": "Beo OS", "connected": bool(env.get("os"))},
+            {"kind": "gmail", "label": "ceo@", "connected": env["gmail"]},
+            {"kind": "calendar", "label": "Google Calendar", "connected": bool(env.get("calendar"))},
+        ]
     else:
         connections = [
-            {"kind": "telegram", "label": "טלגרם", "connected": env["telegram"]},
+            {
+                "kind": "telegram",
+                "label": "טלגרם (שיחה ועדכונים)",
+                "connected": env["telegram"],
+            },
             {"kind": "openai", "label": "OpenAI", "connected": env["openai"]},
             {
                 "kind": "instagram",
-                "label": "אינסטגרם (פרסום)",
-                "connected": publish == "meta",
+                "label": "אינסטגרם (פרסום אחרי אישור ב-OS)",
+                "connected": bool(env.get("meta")),
             },
             {
                 "kind": "facebook",
-                "label": "פייסבוק (פרסום)",
-                "connected": publish == "meta",
+                "label": "פייסבוק (פרסום אחרי אישור ב-OS)",
+                "connected": bool(env.get("meta")),
             },
         ]
     return {
@@ -263,6 +306,9 @@ def start_agent(agent_id: str) -> dict[str, Any]:
     if agent_id == "leads-beo":
         set_leads_on(True)
         return {"ok": True, "action": "start", "agent": agent_id}
+    if agent_id == "johnny-beo":
+        set_johnny_on(True)
+        return {"ok": True, "action": "start", "agent": agent_id}
     if agent_id == "social-beo":
         probed = docker_container_running(SOCIAL_CONTAINER)
         if probed is not None:
@@ -279,6 +325,9 @@ def stop_agent(agent_id: str) -> dict[str, Any]:
         return {"ok": False, "error": "סוכן לא בקטלוג"}
     if agent_id == "leads-beo":
         set_leads_on(False)
+        return {"ok": True, "action": "stop", "agent": agent_id}
+    if agent_id == "johnny-beo":
+        set_johnny_on(False)
         return {"ok": True, "action": "stop", "agent": agent_id}
     if agent_id == "social-beo":
         probed = docker_container_running(SOCIAL_CONTAINER)

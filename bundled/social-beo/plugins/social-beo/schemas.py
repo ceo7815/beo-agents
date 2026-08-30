@@ -1,5 +1,14 @@
 """Tool schemas for Beo Social."""
 
+GET_SOCIAL_BOARD = {
+    "name": "get_social_board",
+    "description": (
+        "Read Beo OS social calendar: pending approval, scheduled, published, failed. "
+        "Call when Or asks what went up, what's next, or why something failed. Never publish."
+    ),
+    "parameters": {"type": "object", "properties": {}},
+}
+
 GET_BRAND_ASSETS = {
     "name": "get_brand_assets",
     "description": (

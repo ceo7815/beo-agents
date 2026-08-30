@@ -16,15 +16,30 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-luna}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       SOCIAL_TELEGRAM_BOT_TOKEN: ${SOCIAL_TELEGRAM_BOT_TOKEN:-}
+      JOHNNY_TELEGRAM_BOT_TOKEN: ${JOHNNY_TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      BEO_OS_URL: ${BEO_OS_URL:-https://os.beosystem.com}
+      BOT_API_KEY: ${BOT_API_KEY:-}
+      JOHNNY_ACTOR_USER_ID: ${JOHNNY_ACTOR_USER_ID:-}
+      JOHNNY_ACTOR_NAME: ${JOHNNY_ACTOR_NAME:-אור}
+      JOHNNY_ACTOR_EMAIL: ${JOHNNY_ACTOR_EMAIL:-ceo@beosystem.co.il}
+      CEO_GMAIL_REFRESH_TOKEN: ${CEO_GMAIL_REFRESH_TOKEN:-}
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-primary}
       GMAIL_FROM: ${GMAIL_FROM:-sales@beosystem.com}
       GMAIL_FROM_NAME: ${GMAIL_FROM_NAME:-Shay Beo Systems}
       GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
       GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
       GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
       WHATSAPP_ME_URL: ${WHATSAPP_ME_URL:-https://wa.me/33632519053}
+      META_PAGE_ID: ${META_PAGE_ID:-}
+      META_PAGE_ACCESS_TOKEN: ${META_PAGE_ACCESS_TOKEN:-}
+      META_IG_USER_ID: ${META_IG_USER_ID:-}
+      META_GRAPH_VERSION: ${META_GRAPH_VERSION:-v21.0}
+      SOCIAL_DRY_RUN: ${SOCIAL_DRY_RUN:-1}
     volumes:
       - leads-home:/opt/beo-agents/agents/leads-beo/home
+      - johnny-home:/opt/beo-agents/agents/johnny-beo/home
+      - social-pipeline:/opt/beo-agents/bundled/social-beo/home
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8788:8788"
@@ -35,6 +50,8 @@ services:
       dockerfile: deploy/Dockerfile.social
     container_name: beo-social
     restart: unless-stopped
+    depends_on:
+      - control
     volumes:
       - social-home:/opt/data
     environment:
@@ -43,7 +60,10 @@ services:
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
       HERMES_UID: ${HERMES_UID:-1000}
       HERMES_GID: ${HERMES_GID:-1000}
+      BEO_CONTROL_URL: http://control:8788
 
 volumes:
   leads-home:
+  johnny-home:
   social-home:
+  social-pipeline:

@@ -259,6 +259,40 @@ def performance_insights(params: dict, **kwargs) -> str:
     )
 
 
+def get_social_board(params: dict, **kwargs) -> str:
+    """Read the Beo OS social calendar. Never publishes."""
+    del kwargs, params
+    import urllib.error
+    import urllib.request
+
+    base = (os.environ.get("BEO_CONTROL_URL") or "http://127.0.0.1:8788").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{base}/api/social/overview", timeout=8) as resp:
+            overview = json.loads(resp.read().decode("utf-8"))
+        with urllib.request.urlopen(f"{base}/api/social/posts", timeout=8) as resp:
+            posts = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        return _err(f"לוח Beo OS לא זמין: {exc}")
+    items = (posts.get("items") or [])[:15]
+    brief = []
+    for row in items:
+        brief.append(
+            {
+                "status": row.get("status"),
+                "when": row.get("scheduled_at"),
+                "ig": (row.get("caption_ig") or row.get("caption") or "")[:160],
+                "error": row.get("error"),
+            }
+        )
+    return _ok(
+        {
+            "overview": overview,
+            "recent": brief,
+            "rule": "Answer from this. Publishing happens only after OS approval.",
+        }
+    )
+
+
 def _num(value: Any) -> float:
     try:
         if value is None or value == "":

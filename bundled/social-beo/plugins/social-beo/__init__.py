@@ -5,6 +5,12 @@ from . import gateway_cancel, preparing, publish_demo, schemas, tools
 
 def register(ctx):
     ctx.register_tool(
+        name="get_social_board",
+        toolset="social-beo",
+        schema=schemas.GET_SOCIAL_BOARD,
+        handler=tools.get_social_board,
+    )
+    ctx.register_tool(
         name="get_brand_assets",
         toolset="social-beo",
         schema=schemas.GET_BRAND_ASSETS,

@@ -11,6 +11,7 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 LEADS_POWER = REPO / "agents" / "leads-beo" / "home" / "telegram" / "power.json"
+JOHNNY_POWER = REPO / "agents" / "johnny-beo" / "home" / "power.json"
 DOCKER_SOCK = os.environ.get("DOCKER_SOCK", "/var/run/docker.sock")
 SOCIAL_CONTAINER = os.environ.get("BEO_SOCIAL_CONTAINER", "beo-social")
 
@@ -83,6 +84,24 @@ def leads_is_on() -> bool:
 def set_leads_on(on: bool) -> None:
     LEADS_POWER.parent.mkdir(parents=True, exist_ok=True)
     LEADS_POWER.write_text(
+        json.dumps({"on": bool(on)}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def johnny_is_on() -> bool:
+    if not JOHNNY_POWER.is_file():
+        return True
+    try:
+        data = json.loads(JOHNNY_POWER.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return True
+    return bool(data.get("on", True))
+
+
+def set_johnny_on(on: bool) -> None:
+    JOHNNY_POWER.parent.mkdir(parents=True, exist_ok=True)
+    JOHNNY_POWER.write_text(
         json.dumps({"on": bool(on)}, ensure_ascii=False),
         encoding="utf-8",
     )

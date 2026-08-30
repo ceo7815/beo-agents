@@ -1,0 +1,13 @@
+id: johnny-beo
+handle: johnny.beo
+display_name: Beo Chief
+persona: ג'וני
+owner: Beo Systems
+owner_person: אור
+role: ceo
+website: https://beosystem.com
+version: 1
+purpose: Digital CEO / chief of staff. Telegram office. Full Beo OS. Google Calendar master. ceo@ mail. Green Invoice.
+
+channels:
+  v1: [telegram, beo_os]

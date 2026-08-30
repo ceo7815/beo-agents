@@ -99,23 +99,11 @@ def schedule_ask() -> None:
 
 
 def handle_inbound(text: str) -> str | None:
-    """If waiting for approval, return the reply to send (and skip the LLM)."""
-    if not is_awaiting():
-        return None
-    if looks_like_yes(text):
-        clear_awaiting()
-        send_telegram(PUBLISHED, reply_markup={"remove_keyboard": True})
-        return PUBLISHED
-    if looks_like_no(text):
-        clear_awaiting()
-        send_telegram(REJECTED, reply_markup={"remove_keyboard": True})
-        return REJECTED
+    """Publishing is approved in Beo OS only. Telegram never confirms a live post."""
+    del text
     return None
 
 
 def on_transform_llm_output(response_text: str, **kwargs):
-    del kwargs
-    text = response_text or ""
-    if "MEDIA:" in text:
-        schedule_ask()
+    del kwargs, response_text
     return None
