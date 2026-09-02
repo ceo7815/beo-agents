@@ -35,7 +35,7 @@ Skip restaurants, salons, tiny Instagram shops, hi-tech that builds in-house, an
 
 ## Hard rules
 
-1. Email only from the company website (mailto, footer, contact page). No Hunter. No guessing addresses.
+1. Email only from the company website (mailto, footer, contact page). Any address on the page counts — `info@`, the owner’s Gmail, Walla, Outlook. No Hunter. No guessing addresses that are not on the site.
 2. No public email → skip. Record skip in the pipeline.
 3. Never email a domain already in the pipeline, a company that already got a mail and did not reply, or an existing Beo OS client.
 4. One follow-up only: ~48 hours after send, no human reply, no bounce → a new pending draft in the same Gmail thread. Still needs OS approval. After that, no reply → close (`closed_no_reply`). Not a Beo OS lead.
@@ -82,7 +82,7 @@ Then add:
 - ICP fit 0–40 (insurance / import-wholesale / quotes-invoices beat generic; **learned boost** from real replies, only after enough closed outcomes)
 - Site signal 0–25 (a real sentence or product from **their** page)
 - Pain fit 0–25 (that pain maps to one Beo product)
-- Contact quality 0–10 (guy@ beats info@) — never written into the email
+- Contact quality 0–10 (guy@gmail.com on the site beats a missing mailbox; info@ is optional) — never written into the email
 
 ## Daily self-learning
 

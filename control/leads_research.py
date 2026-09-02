@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from leads_store import (
+    SHARED_MAIL_HOSTS,
     _env_value,
     _now,
     get_item,
@@ -80,17 +81,25 @@ SKIP_EMAIL_PARTS = (
     "sentry.io",
     "wixpress.com",
     "cloudflare",
-    "google.com",
     "gstatic.com",
+    "googleapis.com",
     "schema.org",
     "w3.org",
-    "png",
-    "jpg",
-    "jpeg",
-    "webp",
-    "svg",
     "godaddy",
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
 )
+
+JUNK_LOCAL = {
+    "noreply",
+    "no-reply",
+    "donotreply",
+    "mailer-daemon",
+    "postmaster",
+    "privacy",
+    "abuse",
+}
 
 CONTACT_PATHS = (
     "/",
@@ -98,9 +107,12 @@ CONTACT_PATHS = (
     "/contact-us",
     "/contactus",
     "/he/contact",
+    "/he/contact-us",
+    "/en/contact",
     "/%D7%A6%D7%95%D7%A8-%D7%A7%D7%A9%D7%A8",
     "/צור-קשר",
     "/he/צור-קשר",
+    "/יצירת-קשר",
     "/contacts",
     "/contact.html",
     "/about",
@@ -111,6 +123,8 @@ CONTACT_PATHS = (
     "/our-story",
     "/privacy",
     "/privacy-policy",
+    "/get-in-touch",
+    "/keep-in-touch",
 )
 
 
@@ -362,29 +376,70 @@ def _emails_from_html(page: str) -> list[str]:
         re.I,
     ):
         found.append(f"{local}@{host}")
+    for local, host, tld in re.findall(
+        r"([A-Z0-9._%+\-]+)\s*(?:\[at\]|\(at\)|\s+at\s+)\s*([A-Z0-9.\-]+)\s*(?:\[dot\]|\(dot\)|\s+dot\s+)\s*([A-Z]{2,})",
+        page,
+        re.I,
+    ):
+        found.append(f"{local}@{host}.{tld}")
+    for mail in re.findall(
+        r'["\']email["\']\s*:\s*["\']([^"\']+@[^"\']+)["\']',
+        page,
+        re.I,
+    ):
+        found.append(mail)
     return found
+
+
+def _email_host(email: str) -> str:
+    return email.split("@", 1)[-1].lower().strip()
+
+
+def _is_junk_email(email: str) -> bool:
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return True
+    if email.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".css", ".js", ".svg")):
+        return True
+    local = email.split("@", 1)[0].lower()
+    host = _email_host(email)
+    if local in JUNK_LOCAL or local.startswith("noreply"):
+        return True
+    if host in {"google.com", "gstatic.com"}:
+        return True
+    if any(part in email for part in SKIP_EMAIL_PARTS):
+        return True
+    return False
+
+
+def _email_rank(email: str, site_domain: str) -> tuple[int, str]:
+    """Lower is better. Gmail/Walla on the page is a real owner mailbox — not a consolation prize."""
+    host = _email_host(email)
+    local = email.split("@", 1)[0].lower()
+    generic = local in GENERIC_MAILBOXES or local.startswith("info") or local.startswith("service")
+    webmail = host in SHARED_MAIL_HOSTS
+    same = bool(
+        site_domain
+        and (host == site_domain or host.endswith("." + site_domain) or email.endswith("@" + site_domain))
+    )
+    if webmail:
+        return (0, email)
+    if same and not generic:
+        return (1, email)
+    if same:
+        return (2, email)
+    return (3, email)
 
 
 def _clean_emails(found: list[str], domain: str) -> list[str]:
     out: list[str] = []
     for raw in found:
         email = _unglue_email(raw.strip().strip(".,;<>()[]").lower())
-        if "@" not in email or "." not in email.split("@")[-1]:
+        if _is_junk_email(email):
             continue
-        if any(part in email for part in SKIP_EMAIL_PARTS):
-            continue
-        if email.endswith((".png", ".jpg", ".gif", ".webp", ".css", ".js")):
-            continue
-        if domain and not email.endswith(domain) and email.split("@")[-1].count(".") >= 1:
-            # Prefer same-domain, but keep others if none yet
-            pass
         if email not in out:
             out.append(email)
-    same = [e for e in out if e.endswith(domain)]
-    ranked = same + [e for e in out if e not in same]
-    prefer = [e for e in ranked if e.split("@")[0] in {"info", "office", "sales", "contact", "hello", "support"}]
-    rest = [e for e in ranked if e not in prefer]
-    return prefer + rest
+    out.sort(key=lambda e: _email_rank(e, domain))
+    return out
 
 
 def _plain(html_chunk: str) -> str:
@@ -483,7 +538,22 @@ def scrape_site(url: str) -> dict[str, Any]:
             if candidate and candidate not in names:
                 names.append(candidate)
         emails.extend(_emails_from_html(page))
-        if _clean_emails(emails, domain):
+        cleaned_now = _clean_emails(emails, domain)
+        best_host = _email_host(cleaned_now[0]) if cleaned_now else ""
+        is_contact = path not in {
+            "/",
+            "/he",
+            "/about",
+            "/about-us",
+            "/our-story",
+            "/privacy",
+            "/privacy-policy",
+            "/אודות",
+            "/%D7%90%D7%95%D7%93%D7%95%D7%AA",
+        }
+        if best_host in SHARED_MAIL_HOSTS:
+            break
+        if cleaned_now and is_contact:
             break
     cleaned = _clean_emails(emails, domain)
     blob = " ".join(html_parts)

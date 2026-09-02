@@ -111,16 +111,43 @@ def get_item(item_id: str) -> dict[str, Any] | None:
     return None
 
 
+# Shared inboxes are not a company. Burning gmail.com would skip every owner on Gmail.
+SHARED_MAIL_HOSTS = frozenset(
+    {
+        "gmail.com",
+        "googlemail.com",
+        "walla.co.il",
+        "walla.com",
+        "outlook.com",
+        "hotmail.com",
+        "live.com",
+        "msn.com",
+        "yahoo.com",
+        "ymail.com",
+        "icloud.com",
+        "me.com",
+        "proton.me",
+        "protonmail.com",
+        "netvision.net.il",
+        "012.net.il",
+        "bezeqint.net",
+        "mail.com",
+    }
+)
+
+
 def known_domains() -> set[str]:
     with LOCK:
         out: set[str] = set()
         for row in _read().get("items") or []:
             domain = str(row.get("domain") or "").strip().lower()
-            if domain:
+            if domain and domain not in SHARED_MAIL_HOSTS:
                 out.add(domain)
             email = str(row.get("email") or "").strip().lower()
             if "@" in email:
-                out.add(email.split("@", 1)[1])
+                host = email.split("@", 1)[1]
+                if host not in SHARED_MAIL_HOSTS:
+                    out.add(host)
         return out
 
 
