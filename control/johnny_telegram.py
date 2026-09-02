@@ -175,6 +175,7 @@ def _openai_chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
         "messages": messages,
         "tools": TOOLS,
         "tool_choice": "auto",
+        "reasoning_effort": "none",
     }
     req = urllib.request.Request(
         API,
@@ -268,7 +269,8 @@ def _run_agent(user_text: str, chat_id: int | None = None) -> str:
             _tg("sendChatAction", chat_id=chat_id, action="typing")
         data = _openai_chat(messages)
         if data.get("error"):
-            return f"לא הצלחתי לחשוב עכשיו. {data['error'][:180]}"
+            _log(f"openai {data['error'][:240]}")
+            return "לא הצלחתי לחשוב עכשיו. תשלח שוב?"
         choice = ((data.get("choices") or [{}])[0]).get("message") or {}
         tool_calls = choice.get("tool_calls") or []
         if tool_calls:
