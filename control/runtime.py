@@ -81,6 +81,7 @@ def _env_flags(home: Path, agent_id: str) -> dict[str, bool]:
         "calendar": False,
         "os": False,
         "meta": False,
+        "rivhit": False,
     }
     if agent_id == "leads-beo":
         flags["telegram"] = bool((os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip())
@@ -92,6 +93,9 @@ def _env_flags(home: Path, agent_id: str) -> dict[str, bool]:
         flags["gmail"] = bool((os.environ.get("CEO_GMAIL_REFRESH_TOKEN") or "").strip())
         flags["calendar"] = flags["gmail"] or (home / "secrets" / "google-token.json").is_file()
         flags["os"] = bool((os.environ.get("BOT_API_KEY") or "").strip())
+        flags["rivhit"] = bool(
+            (os.environ.get("RIVHIT_API_KEY") or os.environ.get("RIVHIT_TOKEN") or "").strip()
+        )
         if (home / "secrets" / "google-token.json").is_file():
             flags["gmail"] = True
     elif agent_id == "social-beo":
@@ -127,6 +131,8 @@ def _env_flags(home: Path, agent_id: str) -> dict[str, bool]:
             flags["calendar"] = True
         if key == "BOT_API_KEY" and value:
             flags["os"] = True
+        if key in {"RIVHIT_API_KEY", "RIVHIT_TOKEN"} and value:
+            flags["rivhit"] = True
         if key == "GMAIL_REFRESH_TOKEN" and value:
             flags["gmail"] = True
         if key == "META_PAGE_ACCESS_TOKEN" and value:
@@ -186,11 +192,43 @@ def snapshot(row: dict[str, Any]) -> dict[str, Any]:
         ]
     elif agent_id == "johnny-beo":
         connections = [
-            {"kind": "telegram", "label": "טלגרם (שיחה + קול)", "connected": env["telegram"]},
+            {
+                "kind": "telegram",
+                "label": "טלגרם (שיחה + קול)",
+                "connected": env["telegram"],
+                "note": None if env["telegram"] else "xCloud: JOHNNY_TELEGRAM_BOT_TOKEN — בוט נפרד משי",
+            },
             {"kind": "openai", "label": "OpenAI", "connected": env["openai"]},
-            {"kind": "beo_os", "label": "Beo OS", "connected": bool(env.get("os"))},
-            {"kind": "gmail", "label": "ceo@", "connected": env["gmail"]},
-            {"kind": "calendar", "label": "Google Calendar", "connected": bool(env.get("calendar"))},
+            {
+                "kind": "beo_os",
+                "label": "Beo OS",
+                "connected": bool(env.get("os")),
+                "note": None if env.get("os") else "xCloud: BOT_API_KEY + JOHNNY_ACTOR_USER_ID",
+            },
+            {
+                "kind": "gmail",
+                "label": "ceo@",
+                "connected": env["gmail"],
+                "note": None if env["gmail"] else "xCloud: CEO_GMAIL_REFRESH_TOKEN (ceo@beosystem.co.il)",
+            },
+            {
+                "kind": "calendar",
+                "label": "Google Calendar + Meet",
+                "connected": bool(env.get("calendar")),
+                "note": None if env.get("calendar") else "אותו טוקן כמו ceo@ — Calendar + Meet",
+            },
+            {
+                "kind": "web",
+                "label": "חיפוש אינטרנט",
+                "connected": True,
+                "note": "כמו ChatGPT — בלי מפתח נוסף",
+            },
+            {
+                "kind": "rivhit",
+                "label": "ריווחית אונליין",
+                "connected": bool(env.get("rivhit")),
+                "note": None if env.get("rivhit") else "עתידי — xCloud: RIVHIT_API_KEY כשיהיה",
+            },
         ]
     else:
         connections = [
@@ -204,11 +242,17 @@ def snapshot(row: dict[str, Any]) -> dict[str, Any]:
                 "kind": "instagram",
                 "label": "אינסטגרם (פרסום אחרי אישור ב-OS)",
                 "connected": bool(env.get("meta")),
+                "note": None
+                if env.get("meta")
+                else "xCloud: META_PAGE_ID + META_PAGE_ACCESS_TOKEN + META_IG_USER_ID, ואז SOCIAL_DRY_RUN=0",
             },
             {
                 "kind": "facebook",
                 "label": "פייסבוק (פרסום אחרי אישור ב-OS)",
                 "connected": bool(env.get("meta")),
+                "note": None
+                if env.get("meta")
+                else "טוקני Meta של Beo — לא של ליבה",
             },
         ]
     return {

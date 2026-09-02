@@ -142,13 +142,21 @@ class Handler(BaseHTTPRequestHandler):
             _json(self, 500, {"ok": False, "error": str(exc)[:400]})
 
 
+def _is_live_server() -> bool:
+    """Docker binds 0.0.0.0. Local 127.0.0.1 must not steal production Telegram long-poll."""
+    return HOST in {"0.0.0.0", "::"}
+
+
 def main() -> None:
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Beo control http://{HOST}:{PORT}", flush=True)
-    start_telegram_thread()
+    if _is_live_server():
+        start_telegram_thread()
+        start_johnny_thread()
+    else:
+        print("local: Telegram pollers off — live agents.beosystem.com owns the bots", flush=True)
     start_schedule_thread()
     start_social_thread()
-    start_johnny_thread()
     httpd.serve_forever()
 
 

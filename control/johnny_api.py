@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from johnny_google import connected as google_connected
 from johnny_os import os_connected, os_get, resolve_actor_id
-from johnny_store import env_flag, get_pending, johnny_is_on, recent_actions
+from johnny_store import env_flag, get_pending, johnny_is_on, recent_actions, rivhit_connected
 from johnny_tools import _specialists, _today
 
 
@@ -40,4 +40,9 @@ def overview() -> dict:
         "actions": recent_actions(10),
         "mailbox": "ceo@beosystem.co.il",
         "calendar_master": "Google Calendar",
+        "meet": bool(g.get("calendar")),
+        "voice": True,
+        "web_search": True,
+        "rivhit": rivhit_connected(),
+        "approve_writes": True,
     }

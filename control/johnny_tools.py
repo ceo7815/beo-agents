@@ -17,7 +17,7 @@ from johnny_os import (
     os_update,
     resolve_actor_id,
 )
-from johnny_store import log_action, set_pending
+from johnny_store import add_memory, log_action, rivhit_connected, set_pending
 
 IL = timezone(timedelta(hours=3))
 
@@ -26,7 +26,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "os_search",
-            "description": "חיפוש ב-Beo OS. entity: tasks, leads, clients, projects, meetings, campaigns, suppliers, deals, users, hostingrecords, invoices",
+            "description": "חיפוש ב-Beo OS. entity: tasks, leads, clients, projects, meetings, campaigns, suppliers, deals, users, hostingrecords, invoices, docs",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -61,7 +61,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "os_create",
-            "description": "יצירה ב-Beo OS לפי השדות האמיתיים. משימה: title, assigneeId, dueDate (YYYY-MM-DD), description, status, priority, clientId, projectId, dueTime. ליד: name, ownerId, company, phone, email, status, clientNeeds. פגישה: title, purpose, agenda, startDate, startTime, endTime, organizerUserId, participantUserIds, location. לקוח: name, contact, phone, email.",
+            "description": "מבקש ליצור ב-Beo OS (משימה, ליד, לקוח, פרויקט, פגישה…). לא רץ עד שאור כותב כן.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -76,7 +76,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "os_update",
-            "description": "עדכון רשומה ב-Beo OS",
+            "description": "מבקש עדכון רשומה ב-Beo OS. רץ רק אחרי כן של אור.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -151,8 +151,22 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "calendar_list",
+            "description": "פגישות מ-Google Calendar. day=YYYY-MM-DD או ריק = מהעכשיו והלאה. כולל קישור Meet אם יש.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "day": {"type": "string"},
+                    "max": {"type": "integer"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "calendar_create",
-            "description": "קובע פגישה. Google Calendar מקור. גם משקף ל-Beo OS. Meet אם need_meet=true.",
+            "description": "מבקש לקבוע פגישה ביומן Google (מקור האמת) + שיקוף ל-Beo OS. need_meet=true מוסיף Google Meet. רץ אחרי כן.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -164,6 +178,7 @@ TOOLS: list[dict[str, Any]] = [
                     "endTime": {"type": "string"},
                     "location": {"type": "string"},
                     "need_meet": {"type": "boolean"},
+                    "attendees": {"type": "string", "description": "מיילים מוזמנים, מופרדים בפסיק"},
                     "clientId": {"type": "string"},
                     "leadId": {"type": "string"},
                 },
@@ -180,6 +195,62 @@ TOOLS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {"q": {"type": "string"}, "max": {"type": "integer"}},
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mail_get",
+            "description": "קריאת מייל אחד מ-ceo@ לפי id מ-mail_list",
+            "parameters": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": ["id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "חיפוש באינטרנט כמו ChatGPT. לחדשות, חברות, מחירים, חוקים — לא במקום Beo OS.",
+            "parameters": {
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_fetch",
+            "description": "קורא דף אינטרנט לפי כתובת. אחרי שמצאת קישור ב-web_search.",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_memory",
+            "description": "זוכר עובדה על אור או על Beo לשיחות הבאות (העדפות, לקוחות, איך מדברים).",
+            "parameters": {
+                "type": "object",
+                "properties": {"fact": {"type": "string"}},
+                "required": ["fact"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rivhit_status",
+            "description": "סטטוס חיבור ריווחית אונליין (הנהלת חשבונות). עתידי — עד שיהיה API.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -251,8 +322,12 @@ def _fill_defaults(entity: str, data: dict[str, Any]) -> dict[str, Any]:
         out.setdefault("agenda", out.get("agenda") or "")
         if not isinstance(out.get("participantUserIds"), list):
             out["participantUserIds"] = []
+    if entity == "projects":
+        out.setdefault("ownerId", uid)
+        out.setdefault("status", "active")
     if entity == "clients":
         out.setdefault("contact", out.get("contact") or out.get("name") or "")
+        out.setdefault("status", out.get("status") or "active")
     return out
 
 
@@ -291,37 +366,24 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
         entity = str(args.get("entity") or "")
         data = args.get("data") if isinstance(args.get("data"), dict) else {}
         data = _fill_defaults(entity, data)
-        if entity == "meetings":
-            from johnny_google import create_calendar_event
-
-            cal = create_calendar_event(
-                title=str(data.get("title") or ""),
-                start_date=str(data.get("startDate") or ""),
-                start_time=str(data.get("startTime") or "10:00"),
-                end_time=str(data.get("endTime") or ""),
-                location=str(data.get("location") or ""),
-                description=str(data.get("agenda") or data.get("purpose") or ""),
-                meet=False,
-            )
-            if cal.get("html_link"):
-                data["location"] = data.get("location") or cal.get("html_link")
-            if cal.get("meet_link"):
-                data["location"] = cal["meet_link"]
-            result = os_create(entity, data)
-            result["google"] = cal
-            log_action("create", f"meetings {data.get('title')}")
-            return _dump(result)
-        result = os_create(entity, data)
-        log_action("create", f"{entity} {data.get('title') or data.get('name') or ''}")
-        return _dump(result)
+        label = str(data.get("title") or data.get("name") or entity)
+        pid = set_pending(
+            "os_write",
+            {"op": "create", "entity": entity, "data": data, "need_meet": bool(args.get("need_meet"))},
+            f"יצירת {entity}: {label}",
+        )
+        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "ask": f"ליצור {entity} «{label}» ב-Beo OS? כתוב כן."})
 
     if name == "os_update":
         entity = str(args.get("entity") or "")
         item_id = str(args.get("id") or "")
         data = args.get("data") if isinstance(args.get("data"), dict) else {}
-        result = os_update(entity, item_id, data)
-        log_action("update", f"{entity} {item_id}")
-        return _dump(result)
+        pid = set_pending(
+            "os_write",
+            {"op": "update", "entity": entity, "id": item_id, "data": data},
+            f"עדכון {entity} {item_id}",
+        )
+        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "ask": f"לעדכן {entity}? כתוב כן."})
 
     if name == "request_delete":
         entity = str(args.get("entity") or "")
@@ -333,14 +395,24 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
     if name == "today_brief":
         today = _today()
         uid = _uid()
-        tasks = os_get("tasks", assigneeId=uid, limit=50) if uid else os_get("tasks", limit=50)
-        leads = os_get("leads", status="new", limit=30)
-        meetings = os_get("meetings", limit=50)
-        meet_today = [
-            m
-            for m in (meetings.get("items") or [])
-            if isinstance(m, dict) and str(m.get("startDate") or "").startswith(today)
-        ]
+        if os_connected():
+            tasks = os_get("tasks", assigneeId=uid, limit=50) if uid else os_get("tasks", limit=50)
+            leads = os_get("leads", status="new", limit=30)
+            meetings = os_get("meetings", limit=50)
+            meet_today = [
+                m
+                for m in (meetings.get("items") or [])
+                if isinstance(m, dict) and str(m.get("startDate") or "").startswith(today)
+            ]
+        else:
+            tasks, leads, meet_today = {"items": []}, {"items": []}, []
+        google_today: dict[str, Any] = {}
+        try:
+            from johnny_google import list_events
+
+            google_today = list_events(day=today)
+        except Exception as exc:
+            google_today = {"ok": False, "error": str(exc)[:200]}
         log_action("brief", today)
         return _dump(
             {
@@ -349,6 +421,7 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
                 "tasks": tasks.get("items") or [],
                 "leads_new": leads.get("items") or [],
                 "meetings_today": meet_today,
+                "google_today": google_today.get("items") if isinstance(google_today, dict) else [],
                 "specialists": _specialists(),
                 "os": os_connected(),
             }
@@ -372,48 +445,83 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
         )
         return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "ask": f"{summary}\nלאשר? כתוב כן."})
 
-    if name == "calendar_create":
-        from johnny_google import create_calendar_event
+    if name == "calendar_list":
+        from johnny_google import list_events
 
+        return _dump(list_events(day=str(args.get("day") or ""), max_n=int(args.get("max") or 12)))
+
+    if name == "calendar_create":
         title = str(args.get("title") or "")
         start = str(args.get("startDate") or "")
         st = str(args.get("startTime") or "10:00")
         et = str(args.get("endTime") or "")
-        meet = bool(args.get("need_meet"))
-        cal = create_calendar_event(
-            title=title,
-            start_date=start,
-            start_time=st,
-            end_time=et,
-            location=str(args.get("location") or ""),
-            description=str(args.get("agenda") or args.get("purpose") or ""),
-            meet=meet,
+        meet = True if args.get("need_meet") is None else bool(args.get("need_meet"))
+        payload = {
+            "title": title,
+            "startDate": start,
+            "startTime": st,
+            "endTime": et,
+            "location": str(args.get("location") or ""),
+            "purpose": str(args.get("purpose") or title),
+            "agenda": str(args.get("agenda") or ""),
+            "need_meet": meet,
+            "attendees": str(args.get("attendees") or ""),
+            "clientId": args.get("clientId"),
+            "leadId": args.get("leadId"),
+        }
+        pid = set_pending(
+            "calendar",
+            payload,
+            f"פגישה {title} {start} {st}" + (" + Meet" if meet else ""),
         )
-        uid = _uid()
-        data = _fill_defaults(
-            "meetings",
+        return _dump(
             {
-                "title": title,
-                "purpose": str(args.get("purpose") or title),
-                "agenda": str(args.get("agenda") or ""),
-                "startDate": start,
-                "startTime": st,
-                "endTime": et,
-                "location": cal.get("meet_link") or cal.get("html_link") or args.get("location") or "",
-                "clientId": args.get("clientId"),
-                "leadId": args.get("leadId"),
-                "organizerUserId": uid,
-                "participantUserIds": [],
-            },
+                "ok": True,
+                "needs_confirm": True,
+                "pending_id": pid,
+                "ask": f"לקבוע «{title}» ב-{start} {st}" + (" עם Google Meet" if meet else "") + "? כתוב כן.",
+            }
         )
-        os_row = os_create("meetings", data) if os_connected() else {"ok": False, "error": "OS לא מחובר"}
-        log_action("calendar", title)
-        return _dump({"ok": True, "google": cal, "os": os_row})
 
     if name == "mail_list":
         from johnny_google import list_mail
 
         return _dump(list_mail(q=str(args.get("q") or ""), max_n=int(args.get("max") or 8)))
+
+    if name == "mail_get":
+        from johnny_google import get_mail
+
+        return _dump(get_mail(str(args.get("id") or "")))
+
+    if name == "web_search":
+        from johnny_web import search as web_search
+
+        result = web_search(str(args.get("q") or ""))
+        log_action("web", str(args.get("q") or "")[:80])
+        return _dump(result)
+
+    if name == "web_fetch":
+        from johnny_web import fetch_page
+
+        result = fetch_page(str(args.get("url") or ""))
+        log_action("fetch", str(args.get("url") or "")[:80])
+        return _dump(result)
+
+    if name == "save_memory":
+        return _dump(add_memory(str(args.get("fact") or "")))
+
+    if name == "rivhit_status":
+        on = rivhit_connected()
+        return _dump(
+            {
+                "ok": True,
+                "connected": on,
+                "product": "ריווחית אונליין",
+                "note": None
+                if on
+                else "עדיין לא מחובר. כספים עכשיו מחשבונית ירוקה (Morning) ב-Beo OS. חיבור ריווחית יבוא עם RIVHIT_API_KEY ב-xCloud.",
+            }
+        )
 
     if name == "request_mail_send":
         to = str(args.get("to") or "")
@@ -476,4 +584,74 @@ def execute_pending(pending: dict[str, Any]) -> str:
             log_action("approve_adi", item_id)
             return _dump({"http": code, **data})
         return _dump({"ok": False, "error": "מי זה לא שי ולא עדי"})
+    if kind == "os_write":
+        op = str(payload.get("op") or "create")
+        entity = str(payload.get("entity") or "")
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        if op == "update":
+            result = os_update(entity, str(payload.get("id") or ""), data)
+            log_action("update", f"{entity} {payload.get('id')}")
+            return _dump(result)
+        if entity == "meetings":
+            from johnny_google import create_calendar_event
+
+            cal = create_calendar_event(
+                title=str(data.get("title") or ""),
+                start_date=str(data.get("startDate") or ""),
+                start_time=str(data.get("startTime") or "10:00"),
+                end_time=str(data.get("endTime") or ""),
+                location=str(data.get("location") or ""),
+                description=str(data.get("agenda") or data.get("purpose") or ""),
+                meet=bool(payload.get("need_meet")),
+                attendees=data.get("attendees"),
+            )
+            if cal.get("meet_link"):
+                data["location"] = cal["meet_link"]
+            elif cal.get("html_link"):
+                data["location"] = data.get("location") or cal.get("html_link")
+            result = os_create(entity, data)
+            result["google"] = cal
+            log_action("create", f"meetings {data.get('title')}")
+            return _dump(result)
+        result = os_create(entity, data)
+        log_action("create", f"{entity} {data.get('title') or data.get('name') or ''}")
+        return _dump(result)
+    if kind == "calendar":
+        from johnny_google import create_calendar_event
+
+        title = str(payload.get("title") or "")
+        start = str(payload.get("startDate") or "")
+        st = str(payload.get("startTime") or "10:00")
+        et = str(payload.get("endTime") or "")
+        meet = bool(payload.get("need_meet"))
+        cal = create_calendar_event(
+            title=title,
+            start_date=start,
+            start_time=st,
+            end_time=et,
+            location=str(payload.get("location") or ""),
+            description=str(payload.get("agenda") or payload.get("purpose") or ""),
+            meet=meet,
+            attendees=payload.get("attendees"),
+        )
+        uid = _uid()
+        data = _fill_defaults(
+            "meetings",
+            {
+                "title": title,
+                "purpose": str(payload.get("purpose") or title),
+                "agenda": str(payload.get("agenda") or ""),
+                "startDate": start,
+                "startTime": st,
+                "endTime": et,
+                "location": cal.get("meet_link") or cal.get("html_link") or payload.get("location") or "",
+                "clientId": payload.get("clientId"),
+                "leadId": payload.get("leadId"),
+                "organizerUserId": uid,
+                "participantUserIds": [],
+            },
+        )
+        os_row = os_create("meetings", data) if os_connected() else {"ok": False, "error": "OS לא מחובר"}
+        log_action("calendar", title)
+        return _dump({"ok": True, "google": cal, "os": os_row})
     return _dump({"ok": False, "error": "אין פעולה ממתינה כזו"})

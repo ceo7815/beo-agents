@@ -12,7 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,16 +23,24 @@ from johnny_store import (
     history,
     johnny_is_on,
     log_action,
+    memory_facts,
     offset,
     remember,
+    rivhit_connected,
     set_offset,
 )
+from johnny_google import connected as google_connected
+from johnny_os import os_connected
 from johnny_tools import TOOLS, dispatch, execute_pending
 
 CTX = ssl.create_default_context()
 API = "https://api.openai.com/v1/chat/completions"
 SOUL = Path(__file__).resolve().parents[1] / "agents" / "johnny-beo" / "SOUL.md"
+USER = Path(__file__).resolve().parents[1] / "agents" / "johnny-beo" / "USER.md"
 CONFIRM = ("כן", "תאשר", "אשר", "יאללה", "בצע", "תנפיק", "תשלח", "ok", "yes")
+DENY = ("לא", "בטל", "cancel", "no", "סור", "עזוב")
+IL = timezone(timedelta(hours=3))
+WEEKDAYS = ("שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון")
 
 
 def _env(name: str) -> str:
@@ -107,13 +115,55 @@ def _soul() -> str:
     try:
         return SOUL.read_text(encoding="utf-8")
     except OSError:
-        return "אתה ג'וני, המנכ״ל הדיגיטלי של Beo Systems. עובד רק מול אור."
+        return "אתה ג'וני. עובד של אור ב-Beo Systems. מדברים רק בטלגרם, על הכל, כמו אדם."
+
+
+def _user() -> str:
+    try:
+        return USER.read_text(encoding="utf-8")
+    except OSError:
+        return "אור, מנכ״ל Beo Systems."
+
+
+def _now_il() -> str:
+    now = datetime.now(timezone.utc).astimezone(IL)
+    return f"{WEEKDAYS[now.weekday()]} {now.strftime('%Y-%m-%d %H:%M')} שעון ישראל"
+
+
+def _live_card() -> str:
+    g = google_connected()
+    pending = get_pending()
+    facts = memory_facts()
+    lines = [
+        f"עכשיו: {_now_il()}",
+        "חיבורים (אל תקרא את זה לאור אלא אם שואל או אם משהו חסר לפעולה):",
+        f"- Beo OS: {'מחובר' if os_connected() else 'לא מחובר — BOT_API_KEY + JOHNNY_ACTOR_USER_ID ב-xCloud'}",
+        f"- ceo@ / יומן Google: {'מחובר' if g.get('gmail') else 'לא מחובר — CEO_GMAIL_REFRESH_TOKEN'}",
+        f"- ריווחית אונליין: {'מחובר' if rivhit_connected() else 'עתידי — לא מחובר'}",
+        "המשרד הוא הטלגרם בלבד. תענה על הכל כמו עובד חכם. אל תציע תפריט. אל תזכיר כלים.",
+    ]
+    if pending:
+        lines.append(f"- ממתין לאישור: {pending.get('summary')}")
+    if facts:
+        lines.append("מה שאתה זוכר על אור/Beo:")
+        lines.extend(f"- {f}" for f in facts[-12:])
+    return "\n".join(lines)
+
+
+def _system() -> str:
+    return _soul() + "\n\n" + _user() + "\n\n" + _live_card()
 
 
 def _confirm_text(text: str) -> bool:
     low = (text or "").strip().lower()
     low = re.sub(r"[.!,?؟]+", "", low).strip()
     return low in CONFIRM or low in {c.lower() for c in CONFIRM}
+
+
+def _deny_text(text: str) -> bool:
+    low = (text or "").strip().lower()
+    low = re.sub(r"[.!,?؟]+", "", low).strip()
+    return low in DENY or low in {c.lower() for c in DENY}
 
 
 def _openai_chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -133,7 +183,7 @@ def _openai_chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=90, context=CTX) as resp:
+        with urllib.request.urlopen(req, timeout=120, context=CTX) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         err = exc.read().decode("utf-8", errors="replace")[:400]
@@ -207,13 +257,15 @@ def _send_voice(chat_id: int, audio: bytes, caption: str = "") -> None:
         _log(f"sendVoice {exc}")
 
 
-def _run_agent(user_text: str) -> str:
-    messages: list[dict[str, Any]] = [{"role": "system", "content": _soul()}]
+def _run_agent(user_text: str, chat_id: int | None = None) -> str:
+    messages: list[dict[str, Any]] = [{"role": "system", "content": _system()}]
     for turn in history():
         messages.append({"role": "user", "content": turn["q"]})
         messages.append({"role": "assistant", "content": turn["a"]})
     messages.append({"role": "user", "content": user_text})
     for _ in range(8):
+        if chat_id:
+            _tg("sendChatAction", chat_id=chat_id, action="typing")
         data = _openai_chat(messages)
         if data.get("error"):
             return f"לא הצלחתי לחשוב עכשיו. {data['error'][:180]}"
@@ -241,25 +293,69 @@ def _run_agent(user_text: str) -> str:
     return "עצרתי אחרי כמה פעולות. תגיד מה הצעד הבא."
 
 
+def _wants_voice(text: str, as_voice: bool) -> bool:
+    if as_voice:
+        return True
+    t = (text or "").strip()
+    return any(phrase in t for phrase in ("תענה בקול", "תגיד בקול", "ענה בקול"))
+
+
+def _done_reply(pending: dict[str, Any], raw: str) -> str:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw[:800]
+    if not isinstance(parsed, dict):
+        return str(parsed)[:800]
+    if parsed.get("ok") is False:
+        return str(parsed.get("error") or raw)[:800]
+    kind = str(pending.get("kind") or "")
+    google = parsed.get("google") if isinstance(parsed.get("google"), dict) else {}
+    meet = str(google.get("meet_link") or "")
+    html_link = str(google.get("html_link") or "")
+    item = parsed.get("item")
+    item_id = parsed.get("id")
+    if not item_id and isinstance(item, dict):
+        item_id = item.get("id")
+    if kind == "calendar":
+        lines = ["קבעתי ביומן Google ושיקפתי ל-Beo OS."]
+        if meet:
+            lines.append(f"Meet: {meet}")
+        if html_link:
+            lines.append(f"יומן: {html_link}")
+        return "\n".join(lines)
+    if kind == "mail":
+        return "שלחתי מ-ceo@."
+    if kind == "invoice":
+        return "הונפקה בחשבונית ירוקה."
+    if kind == "delete":
+        return "נמחק מ-Beo OS."
+    if kind == "specialist":
+        return "אושר."
+    lines = ["עודכן ב-Beo OS."]
+    if item_id:
+        lines[0] = f"עודכן ב-Beo OS. מזהה {item_id}"
+    if meet:
+        lines.append(f"Meet: {meet}")
+    return "\n".join(lines)
+
+
 def _handle_text(chat_id: int, text: str, *, as_voice: bool) -> None:
+    _tg("sendChatAction", chat_id=chat_id, action="typing")
     pending = get_pending()
-    if pending and _confirm_text(text):
+    if pending and _deny_text(text):
+        clear_pending()
+        reply = "ביטלתי. לא נגעתי בכלום."
+    elif pending and _confirm_text(text):
         raw = execute_pending(pending)
         clear_pending()
-        try:
-            parsed = json.loads(raw)
-            ok = parsed.get("ok") is not False
-            reply = "בוצע." if ok else str(parsed.get("error") or raw)[:800]
-            if isinstance(parsed, dict) and parsed.get("id"):
-                reply = f"בוצע. מזהה {parsed.get('id')}"
-        except json.JSONDecodeError:
-            reply = raw[:800]
+        reply = _done_reply(pending, raw)
         log_action("confirm", pending.get("kind") or "")
     else:
-        reply = _run_agent(text)
+        reply = _run_agent(text, chat_id)
     remember(text, reply)
     _tg("sendMessage", chat_id=chat_id, text=reply[:3900])
-    if as_voice:
+    if _wants_voice(text, as_voice):
         audio = _speak(reply)
         if audio:
             _send_voice(chat_id, audio)
@@ -281,7 +377,7 @@ def _poll_once() -> None:
         if not _is_allowed(str(user.get("id") or ""), chat_id):
             continue
         if not johnny_is_on():
-            _tg("sendMessage", chat_id=chat_id, text="ג'וני כבוי ב-Beo OS.")
+            _tg("sendMessage", chat_id=chat_id, text="אני כבוי עכשיו. תדליק אותי מלוח ג'וני ב-Beo OS.")
             continue
         voice = msg.get("voice") or msg.get("audio")
         if voice and voice.get("file_id"):
@@ -294,6 +390,16 @@ def _poll_once() -> None:
             _handle_text(chat_id, text, as_voice=True)
             continue
         text = str(msg.get("text") or "").strip()
+        if text in {"/start", "/help"}:
+            _tg(
+                "sendMessage",
+                chat_id=chat_id,
+                text=(
+                    "היי, אני ג'וני. תדבר חופשי — גם קול — כמו עם עובד. על Beo, על היום, על מה שבא.\n"
+                    "אם צריך לשנות משהו בחברה (יומן, מייל, משימה, חשבונית, שי/עדי) — אשאל כן קודם."
+                ),
+            )
+            continue
         if text:
             _handle_text(chat_id, text, as_voice=False)
 

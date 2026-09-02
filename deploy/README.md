@@ -21,13 +21,24 @@ Enable push-to-deploy (webhook).
 | `OPENAI_MODEL` | `gpt-5.6-luna` |
 | `TELEGRAM_BOT_TOKEN` | שי / Beo Leads bot |
 | `SOCIAL_TELEGRAM_BOT_TOKEN` | עדי / Beo Social bot |
+| `JOHNNY_TELEGRAM_BOT_TOKEN` | ג׳וני — בוט **נפרד**, לא של שי |
 | `TELEGRAM_ALLOWED_USERS` | Or's Telegram id |
+| `BOT_API_KEY` | same key as Beo OS Node `BOT_API_KEY` |
+| `JOHNNY_ACTOR_USER_ID` | Firestore uid of אור in Beo OS |
+| `BEO_OS_URL` | `https://os.beosystem.com` |
 | `GMAIL_FROM` | `sales@beosystem.com` |
 | `GMAIL_FROM_NAME` | `Shay_Beo_Systems` |
-| `GMAIL_REFRESH_TOKEN` | from local `gmail-token.json` (connect once on the PC) |
+| `GMAIL_REFRESH_TOKEN` | Shay `sales@` (connect once on the PC) |
 | `GMAIL_CLIENT_ID` | Google OAuth client id |
 | `GMAIL_CLIENT_SECRET` | Google OAuth client secret |
+| `CEO_GMAIL_REFRESH_TOKEN` | ג׳וני `ceo@beosystem.co.il` + Calendar + Meet |
+| `GOOGLE_CALENDAR_ID` | `primary` unless a dedicated calendar |
+| `RIVHIT_API_KEY` | ריווחית אונליין — later, leave empty until you have it |
 | `WHATSAPP_ME_URL` | `https://wa.me/33632519053` |
+| `META_PAGE_ID` | Beo Facebook Page id (never Liba) |
+| `META_PAGE_ACCESS_TOKEN` | Beo Page token |
+| `META_IG_USER_ID` | Beo Instagram Business id |
+| `SOCIAL_DRY_RUN` | `1` until Meta tokens; then `0` |
 
 Then Deploy. Beo OS should proxy `/api/beo-agents` to `http://127.0.0.1:8788`.
 

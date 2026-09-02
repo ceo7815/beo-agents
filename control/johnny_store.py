@@ -17,6 +17,7 @@ PENDING = HOME / "pending.json"
 CHAT = HOME / "chat.json"
 ACTIONS = HOME / "actions.json"
 OFFSET = HOME / "offset.json"
+MEMORY = HOME / "memory.json"
 LOCK = threading.Lock()
 
 
@@ -84,14 +85,14 @@ def remember(question: str, answer: str) -> None:
     data = _read(CHAT)
     turns = data.get("turns") if isinstance(data.get("turns"), list) else []
     turns.append({"q": (question or "")[:2000], "a": (answer or "")[:2500]})
-    _write(CHAT, {"turns": turns[-24:]})
+    _write(CHAT, {"turns": turns[-60:]})
 
 
 def history() -> list[dict[str, str]]:
     data = _read(CHAT)
     turns = data.get("turns") if isinstance(data.get("turns"), list) else []
     out: list[dict[str, str]] = []
-    for turn in turns[-16:]:
+    for turn in turns[-40:]:
         if isinstance(turn, dict) and turn.get("q") and turn.get("a"):
             out.append({"q": str(turn["q"]), "a": str(turn["a"])})
     return out
@@ -123,3 +124,25 @@ def set_offset(value: int) -> None:
 
 def env_flag(name: str) -> bool:
     return bool((os.environ.get(name) or "").strip())
+
+
+def memory_facts() -> list[str]:
+    data = _read(MEMORY)
+    facts = data.get("facts") if isinstance(data.get("facts"), list) else []
+    return [str(x).strip()[:240] for x in facts if str(x).strip()][:40]
+
+
+def add_memory(fact: str) -> dict[str, Any]:
+    text = (fact or "").strip()
+    if not text:
+        return {"ok": False, "error": "אין מה לזכור"}
+    facts = memory_facts()
+    if text not in facts:
+        facts.append(text[:240])
+    with LOCK:
+        _write(MEMORY, {"facts": facts[-40:], "updated_at": _now()})
+    return {"ok": True, "facts": facts[-40:]}
+
+
+def rivhit_connected() -> bool:
+    return bool((os.environ.get("RIVHIT_API_KEY") or os.environ.get("RIVHIT_TOKEN") or "").strip())

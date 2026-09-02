@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,52 @@ def _creds():
     return creds if creds and creds.valid else None
 
 
+def _attendee_emails(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        parts = [str(x) for x in raw]
+    else:
+        parts = re.split(r"[,;\s]+", str(raw or ""))
+    out: list[str] = []
+    for part in parts:
+        mail = part.strip().strip("<>")
+        if "@" in mail and mail not in out:
+            out.append(mail)
+    return out
+
+
+def _decode_b64(data: str) -> str:
+    pad = "=" * ((4 - len(data) % 4) % 4)
+    return base64.urlsafe_b64decode(data + pad).decode("utf-8", errors="replace")
+
+
+def _mail_body(payload: dict[str, Any] | None) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    mime = str(payload.get("mimeType") or "")
+    data = str((payload.get("body") or {}).get("data") or "")
+    if data and mime.startswith("text/plain"):
+        return _decode_b64(data)
+    parts = payload.get("parts") if isinstance(payload.get("parts"), list) else []
+    plain: list[str] = []
+    html: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        nested = _mail_body(part)
+        child_mime = str(part.get("mimeType") or "")
+        if child_mime.startswith("text/html"):
+            html.append(nested)
+        elif nested:
+            plain.append(nested)
+    if plain:
+        return "\n".join(plain)
+    if data and mime.startswith("text/html"):
+        return re.sub(r"<[^>]+>", " ", _decode_b64(data))
+    if html:
+        return re.sub(r"<[^>]+>", " ", "\n".join(html))
+    return ""
+
+
 def create_calendar_event(
     *,
     title: str,
@@ -66,6 +113,7 @@ def create_calendar_event(
     location: str = "",
     description: str = "",
     meet: bool = False,
+    attendees: Any = None,
 ) -> dict[str, Any]:
     creds = _creds()
     if creds is None:
@@ -89,7 +137,12 @@ def create_calendar_event(
         "start": {"dateTime": f"{start_date}T{start_hm}:00", "timeZone": tz},
         "end": {"dateTime": f"{start_date}T{end_hm}:00", "timeZone": tz},
     }
+    guests = _attendee_emails(attendees)
+    if guests:
+        body["attendees"] = [{"email": mail} for mail in guests]
     kwargs: dict[str, Any] = {"calendarId": _env("GOOGLE_CALENDAR_ID") or "primary", "body": body}
+    if guests or meet:
+        kwargs["sendUpdates"] = "all"
     if meet:
         body["conferenceData"] = {
             "createRequest": {
@@ -114,6 +167,85 @@ def create_calendar_event(
         "html_link": created.get("htmlLink"),
         "meet_link": meet_link or created.get("hangoutLink") or "",
     }
+
+
+def list_events(*, day: str = "", max_n: int = 12) -> dict[str, Any]:
+    creds = _creds()
+    if creds is None:
+        return {"ok": False, "error": "יומן Google לא מחובר"}
+    try:
+        from googleapiclient.discovery import build
+
+        if day:
+            time_min = f"{day}T00:00:00+03:00"
+            time_max = f"{day}T23:59:59+03:00"
+        else:
+            from datetime import datetime, timezone
+
+            time_min = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            time_max = None
+        service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+        kwargs: dict[str, Any] = {
+            "calendarId": _env("GOOGLE_CALENDAR_ID") or "primary",
+            "maxResults": min(max_n, 25),
+            "singleEvents": True,
+            "orderBy": "startTime",
+            "timeMin": time_min,
+        }
+        if time_max:
+            kwargs["timeMax"] = time_max
+        resp = service.events().list(**kwargs).execute()
+        items = []
+        for ev in resp.get("items") or []:
+            start = ev.get("start") or {}
+            hang = ev.get("hangoutLink") or ""
+            meet = hang
+            for point in (ev.get("conferenceData") or {}).get("entryPoints") or []:
+                if point.get("entryPointType") == "video":
+                    meet = str(point.get("uri") or meet)
+            items.append(
+                {
+                    "id": ev.get("id"),
+                    "title": ev.get("summary"),
+                    "start": start.get("dateTime") or start.get("date"),
+                    "location": ev.get("location"),
+                    "meet_link": meet,
+                    "html_link": ev.get("htmlLink"),
+                }
+            )
+        return {"ok": True, "items": items}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:400]}
+
+
+def get_mail(message_id: str) -> dict[str, Any]:
+    creds = _creds()
+    if creds is None:
+        return {"ok": False, "error": "Gmail של ceo@ לא מחובר"}
+    try:
+        from googleapiclient.discovery import build
+
+        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        msg = (
+            service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute()
+        )
+        headers = {h["name"]: h["value"] for h in (msg.get("payload") or {}).get("headers") or []}
+        body = _mail_body(msg.get("payload") if isinstance(msg.get("payload"), dict) else None)
+        return {
+            "ok": True,
+            "id": message_id,
+            "from": headers.get("From"),
+            "to": headers.get("To"),
+            "subject": headers.get("Subject"),
+            "date": headers.get("Date"),
+            "snippet": msg.get("snippet"),
+            "body": (body or msg.get("snippet") or "")[:6000],
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:400]}
 
 
 def list_mail(*, q: str = "", max_n: int = 8) -> dict[str, Any]:
