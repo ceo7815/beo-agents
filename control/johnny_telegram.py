@@ -34,7 +34,7 @@ from johnny_os import os_connected
 from johnny_tools import TOOLS, dispatch, execute_pending
 
 CTX = ssl.create_default_context()
-API = "https://api.openai.com/v1/chat/completions"
+API = "https://api.openai.com/v1/responses"
 SOUL = Path(__file__).resolve().parents[1] / "agents" / "johnny-beo" / "SOUL.md"
 USER = Path(__file__).resolve().parents[1] / "agents" / "johnny-beo" / "USER.md"
 CONFIRM = ("כן", "תאשר", "אשר", "יאללה", "בצע", "תנפיק", "תשלח", "ok", "yes")
@@ -166,16 +166,35 @@ def _deny_text(text: str) -> bool:
     return low in DENY or low in {c.lower() for c in DENY}
 
 
-def _openai_chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
+def _response_tools() -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in TOOLS:
+        fn = row.get("function") if isinstance(row.get("function"), dict) else {}
+        name = str(fn.get("name") or "")
+        if not name:
+            continue
+        out.append(
+            {
+                "type": "function",
+                "name": name,
+                "description": str(fn.get("description") or ""),
+                "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+            }
+        )
+    return out
+
+
+def _openai_respond(inp: list[dict[str, Any]]) -> dict[str, Any]:
     key = _env("OPENAI_API_KEY")
     if not key:
         return {"error": "חסר OPENAI_API_KEY"}
     payload = {
         "model": _env("OPENAI_MODEL") or "gpt-5.6-luna",
-        "messages": messages,
-        "tools": TOOLS,
+        "instructions": _system(),
+        "input": inp,
+        "tools": _response_tools(),
         "tool_choice": "auto",
-        "reasoning_effort": "none",
+        "store": False,
     }
     req = urllib.request.Request(
         API,
@@ -191,6 +210,20 @@ def _openai_chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {"error": err}
     except Exception as exc:
         return {"error": type(exc).__name__}
+
+
+def _output_text(data: dict[str, Any]) -> str:
+    direct = str(data.get("output_text") or "").strip()
+    if direct:
+        return direct
+    chunks: list[str] = []
+    for item in data.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for part in item.get("content") or []:
+            if isinstance(part, dict) and part.get("type") in {"output_text", "text"}:
+                chunks.append(str(part.get("text") or ""))
+    return "".join(chunks).strip()
 
 
 def _transcribe(blob: bytes) -> str:
@@ -259,39 +292,41 @@ def _send_voice(chat_id: int, audio: bytes, caption: str = "") -> None:
 
 
 def _run_agent(user_text: str, chat_id: int | None = None) -> str:
-    messages: list[dict[str, Any]] = [{"role": "system", "content": _system()}]
+    inp: list[dict[str, Any]] = []
     for turn in history():
-        messages.append({"role": "user", "content": turn["q"]})
-        messages.append({"role": "assistant", "content": turn["a"]})
-    messages.append({"role": "user", "content": user_text})
+        inp.append({"role": "user", "content": turn["q"]})
+        inp.append({"role": "assistant", "content": turn["a"]})
+    inp.append({"role": "user", "content": user_text})
     for _ in range(8):
         if chat_id:
             _tg("sendChatAction", chat_id=chat_id, action="typing")
-        data = _openai_chat(messages)
+        data = _openai_respond(inp)
         if data.get("error"):
             _log(f"openai {data['error'][:240]}")
             return "לא הצלחתי לחשוב עכשיו. תשלח שוב?"
-        choice = ((data.get("choices") or [{}])[0]).get("message") or {}
-        tool_calls = choice.get("tool_calls") or []
-        if tool_calls:
-            messages.append(choice)
-            for call in tool_calls:
-                fn = (call.get("function") or {})
-                name = str(fn.get("name") or "")
+        calls = [
+            item
+            for item in (data.get("output") or [])
+            if isinstance(item, dict) and item.get("type") == "function_call"
+        ]
+        if calls:
+            inp.extend([item for item in (data.get("output") or []) if isinstance(item, dict)])
+            for call in calls:
+                name = str(call.get("name") or "")
                 try:
-                    args = json.loads(fn.get("arguments") or "{}")
+                    args = json.loads(call.get("arguments") or "{}")
                 except json.JSONDecodeError:
                     args = {}
                 result = dispatch(name, args if isinstance(args, dict) else {})
-                messages.append(
+                inp.append(
                     {
-                        "role": "tool",
-                        "tool_call_id": call.get("id"),
-                        "content": result,
+                        "type": "function_call_output",
+                        "call_id": call.get("call_id"),
+                        "output": result,
                     }
                 )
             continue
-        return str(choice.get("content") or "אין לי תשובה.").strip()
+        return _output_text(data) or "אין לי תשובה."
     return "עצרתי אחרי כמה פעולות. תגיד מה הצעד הבא."
 
 

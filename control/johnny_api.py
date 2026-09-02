@@ -45,4 +45,5 @@ def overview() -> dict:
         "web_search": True,
         "rivhit": rivhit_connected(),
         "approve_writes": True,
+        "chat_api": "responses",
     }
