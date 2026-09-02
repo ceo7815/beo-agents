@@ -48,10 +48,19 @@ def _now() -> str:
 
 
 def today_il() -> str:
-    # Israel is UTC+2 / +3; date-only for daily batch is local enough via UTC+3 window.
-    from datetime import timedelta
+    return israel_now().strftime("%Y-%m-%d")
 
-    return (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%Y-%m-%d")
+
+def israel_now():
+    """Israel wall clock, including DST."""
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Jerusalem"))
+    except Exception:
+        return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3)))
 
 
 def _empty() -> dict[str, Any]:
@@ -136,10 +145,25 @@ SHARED_MAIL_HOSTS = frozenset(
 )
 
 
+BURN_STATUSES = {
+    "pending_approval",
+    "approved",
+    "sent",
+    "replied",
+    "bounced",
+    "closed_no_reply",
+    "rejected",
+    "skipped_too_big",
+}
+
+
 def known_domains() -> set[str]:
+    """Domains we already mailed or parked — not skips that might gain an email later."""
     with LOCK:
         out: set[str] = set()
         for row in _read().get("items") or []:
+            if str(row.get("status") or "") not in BURN_STATUSES:
+                continue
             domain = str(row.get("domain") or "").strip().lower()
             if domain and domain not in SHARED_MAIL_HOSTS:
                 out.add(domain)
@@ -149,6 +173,22 @@ def known_domains() -> set[str]:
                 if host not in SHARED_MAIL_HOSTS:
                     out.add(host)
         return out
+
+
+def item_by_domain(domain: str) -> dict[str, Any] | None:
+    host = (domain or "").strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if not host:
+        return None
+    with LOCK:
+        for row in _read().get("items") or []:
+            d = str(row.get("domain") or "").strip().lower()
+            if d.startswith("www."):
+                d = d[4:]
+            if d == host:
+                return row
+    return None
 
 
 def pending_today_count() -> int:
@@ -184,7 +224,7 @@ def overview() -> dict[str, Any]:
     return {
         "ok": True,
         "date": day,
-        "target_ready_by": "17:00",
+        "target_ready_by": "10:00",
         "daily_target": 10,
         "score_floor": 72,
         "checked_today": count(

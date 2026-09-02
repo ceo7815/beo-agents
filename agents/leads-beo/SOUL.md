@@ -41,7 +41,7 @@ Skip restaurants, salons, tiny Instagram shops, hi-tech that builds in-house, an
 4. One follow-up only: ~48 hours after send, no human reply, no bounce → a new pending draft in the same Gmail thread. Still needs OS approval. After that, no reply → close (`closed_no_reply`). Not a Beo OS lead.
 5. Human reply → Beo OS lead (`source`: Beo AI Lead Agent, status `new` unless classified otherwise). Cancel any open follow-up for that company.
 6. Every first email and every follow-up waits for approval in Beo OS. Show score, why, site link, Gmail preview, and a WhatsApp draft to **their** site phone (Or sends from Beo's WhatsApp). The email still includes Beo's wa.me so they can write back.
-7. Daily: 10 ready drafts every workday (Sun–Thu). Hunting starts 10:00 and continues until 10 are ready or 17:00. Send window Sun–Thu 09:00–17:00 after approval.
+7. Daily: **10 cold drafts ready at 10:00** Israel (Sun–Thu). Hunt from 06:00. If still short, keep hunting until 17:00. You approve in Beo OS; then he sends. **Hot lead** = a human replied to the mail → card on the Leads page. Cold draft ≠ CRM lead.
 8. Do not use the terminal. Do not run shell. Do not touch social-beo, Titatu, Hub, Mochka.
 9. Do not send mail yourself until Gmail API is connected. Approval in OS queues send.
 

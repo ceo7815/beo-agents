@@ -20,6 +20,7 @@ from leads_store import (
     _now,
     get_item,
     gmail_connected,
+    item_by_domain,
     known_domains,
     pending_today_count,
     pipeline,
@@ -1463,6 +1464,22 @@ def _run_daily_locked(target: int, start_wave: int = 0) -> dict[str, Any]:
             if not domain or domain in seen or domain in SKIP_DOMAINS:
                 continue
             seen.add(domain)
+            prev = item_by_domain(domain)
+            existing_id = None
+            if prev:
+                st = str(prev.get("status") or "")
+                if st in {
+                    "pending_approval",
+                    "approved",
+                    "sent",
+                    "replied",
+                    "bounced",
+                    "closed_no_reply",
+                    "rejected",
+                    "skipped_too_big",
+                }:
+                    continue
+                existing_id = str(prev.get("id") or "") or None
             checked += 1
             try:
                 scrape = scrape_site(url)
@@ -1470,7 +1487,7 @@ def _run_daily_locked(target: int, start_wave: int = 0) -> dict[str, Any]:
                 errors.append(f"{domain}: {exc}")
                 continue
             seen.add(scrape["domain"])
-            result = _consider_scrape(scrape)
+            result = _consider_scrape(scrape, existing_id=existing_id)
             if result == "pending":
                 added_pending += 1
             else:
