@@ -78,6 +78,10 @@ def humanize_os_error(raw: str, errors: list[Any] | None = None) -> str:
     blob = (raw or "").lower()
     if "firebase" in blob or "firestore" in blob:
         return "לא הצלחתי לשמור ב-Beo OS."
+    if "row-level security" in blob or "rls" in blob or "violates row-level" in blob:
+        return "Beo OS לא נתן לכתוב למסד. ב-xCloud של os.beosystem.com המפתח SUPABASE_SERVICE_ROLE_KEY חייב להיות service_role, לא anon."
+    if "internal server error" in blob:
+        return "Beo OS נכשל בשמירה. בדקו ש-SUPABASE_SERVICE_ROLE_KEY באתר OS הוא service_role."
     if "validation" in blob:
         return "חסרים פרטים (כותרת, אחראי ותאריך). לא נשמר כלום."
     if "supabase_not_configured" in blob or "missing_service_role" in blob:
@@ -126,8 +130,13 @@ def _request(method: str, path: str, *, query: dict[str, Any] | None = None, bod
         except Exception:
             return {"ok": False, "error": humanize_os_error(f"OS HTTP {exc.code}")}
         if isinstance(data, dict):
-            data.setdefault("ok", False)
-            data.setdefault("error", data.get("message") or f"OS HTTP {exc.code}")
+            data["ok"] = False
+            code = str(data.get("error") or "")
+            detail = str(data.get("message") or data.get("hint") or "")
+            if code in {"Internal Server Error", "InternalServerError"} or code.startswith("OS HTTP"):
+                data["error"] = detail or code
+            else:
+                data.setdefault("error", detail or f"OS HTTP {exc.code}")
             return _clean_os_payload(data)
         return {"ok": False, "error": humanize_os_error(f"OS HTTP {exc.code}")}
     except Exception:

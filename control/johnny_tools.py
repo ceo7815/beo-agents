@@ -402,6 +402,17 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
     if name == "os_search":
         entity = str(args.get("entity") or "")
         filters = {k: args[k] for k in ("q", "status", "assigneeId", "ownerId", "clientId", "limit") if args.get(k) not in (None, "")}
+        if entity == "tasks":
+            st = str(filters.get("status") or "")
+            if st and _task_status(st) == "todo" and st.strip().lower() not in {"todo"}:
+                filters.pop("status", None)
+            elif st:
+                filters["status"] = _task_status(st)
+            aid = filters.get("assigneeId")
+            if aid is not None:
+                filters["assigneeId"] = _uuid_or(aid, _uid())
+                if not filters["assigneeId"]:
+                    filters.pop("assigneeId", None)
         result = os_get(entity, **filters)
         log_action("os_search", f"{entity} {filters}")
         return _dump(result)
