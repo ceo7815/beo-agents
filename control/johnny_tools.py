@@ -61,7 +61,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "os_create",
-            "description": "מבקש ליצור ב-Beo OS (משימה, ליד, לקוח, פרויקט, פגישה…). לא רץ עד שאור לוחץ מאשר.",
+            "description": "מבקש ליצור ב-Beo OS (משימה, ליד, לקוח, פרויקט, פגישה…). למשימה status רק: todo, doing, done, blocked. לא רץ עד שאור לוחץ מאשר.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -328,14 +328,37 @@ def _uuid_or(value: Any, fallback: str) -> str:
     return text if _UUID.match(text) else fallback
 
 
+def _task_status(value: Any) -> str:
+    key = str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+    return {
+        "todo": "todo",
+        "doing": "doing",
+        "done": "done",
+        "blocked": "blocked",
+        "open": "todo",
+        "new": "todo",
+        "pending": "todo",
+        "in_progress": "doing",
+        "progress": "doing",
+        "complete": "done",
+        "completed": "done",
+        "closed": "done",
+    }.get(key, "todo")
+
+
+def _task_priority(value: Any) -> str:
+    key = str(value or "").strip().lower()
+    return key if key in {"high", "medium", "low"} else "medium"
+
+
 def _fill_defaults(entity: str, data: dict[str, Any]) -> dict[str, Any]:
     uid = _uid()
     out = dict(data)
     if entity == "tasks":
         out["assigneeId"] = _uuid_or(out.get("assigneeId"), uid)
         out["dueDate"] = _ymd(out.get("dueDate"), _today())
-        out.setdefault("status", "todo")
-        out.setdefault("priority", "medium")
+        out["status"] = _task_status(out.get("status"))
+        out["priority"] = _task_priority(out.get("priority"))
         out.setdefault("description", out.get("description") or "")
     if entity == "leads":
         out["ownerId"] = _uuid_or(out.get("ownerId"), uid)
