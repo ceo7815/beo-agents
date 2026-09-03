@@ -24,7 +24,7 @@ Enable push-to-deploy (webhook).
 | `JOHNNY_TELEGRAM_BOT_TOKEN` | ג׳וני — בוט **נפרד**, לא של שי |
 | `TELEGRAM_ALLOWED_USERS` | Or's Telegram id |
 | `BOT_API_KEY` | same key as Beo OS Node `BOT_API_KEY` |
-| `JOHNNY_ACTOR_USER_ID` | Firestore uid of אור in Beo OS |
+| `JOHNNY_ACTOR_USER_ID` | Supabase `profiles.id` of אור in Beo OS |
 | `BEO_OS_URL` | `https://os.beosystem.com` |
 | `GMAIL_FROM` | `sales@beosystem.com` |
 | `GMAIL_FROM_NAME` | `Shay_Beo_Systems` |

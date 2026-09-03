@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from johnny_os import (
     actor,
     finance,
-    issue_invoice,
     os_connected,
     os_create,
     os_delete,
@@ -61,7 +61,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "os_create",
-            "description": "מבקש ליצור ב-Beo OS (משימה, ליד, לקוח, פרויקט, פגישה…). לא רץ עד שאור כותב כן.",
+            "description": "מבקש ליצור ב-Beo OS (משימה, ליד, לקוח, פרויקט, פגישה…). לא רץ עד שאור לוחץ מאשר.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -76,7 +76,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "os_update",
-            "description": "מבקש עדכון רשומה ב-Beo OS. רץ רק אחרי כן של אור.",
+            "description": "מבקש עדכון רשומה ב-Beo OS. רץ רק אחרי מאשר של אור.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -92,7 +92,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "request_delete",
-            "description": "מחיקה דורשת אישור. שומר טיוטה ומבקש כן.",
+            "description": "מחיקה דורשת אישור. שומר טיוטה ומציג כפתורי מאשר / לא מאשר.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -116,7 +116,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "finance_glance",
-            "description": "קריאה בלבד לכספים (חשבונית ירוקה שסונכרנה)",
+            "description": "קריאה בלבד לכספים ב-Beo OS",
             "parameters": {
                 "type": "object",
                 "properties": {"month": {"type": "string", "description": "YYYY-MM"}},
@@ -135,7 +135,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "request_specialist_approve",
-            "description": "מבקש אישור לאשר לשי לשלוח מייל או לעדי לפרסם. אחרי כן של אור.",
+            "description": "מבקש אישור לאשר לשי לשלוח מייל או לעדי לפרסם. אחרי מאשר של אור.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -166,7 +166,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "calendar_create",
-            "description": "מבקש לקבוע פגישה ביומן Google (מקור האמת) + שיקוף ל-Beo OS. need_meet=true מוסיף Google Meet. רץ אחרי כן.",
+            "description": "מבקש לקבוע פגישה ביומן Google (מקור האמת) + שיקוף ל-Beo OS. need_meet=true מוסיף Google Meet. רץ אחרי מאשר.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -273,7 +273,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "request_invoice",
-            "description": "טיוטת חשבונית ירוקה. הנפקה רק אחרי תנפיק/כן.",
+            "description": "חשבונית בריווחית אונליין. עתידי — לא מנפיק עד חיבור.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -300,21 +300,45 @@ def _uid() -> str:
     return resolve_actor_id() or actor().get("userId") or ""
 
 
+_UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
 def _today() -> str:
     return datetime.now(timezone.utc).astimezone(IL).strftime("%Y-%m-%d")
+
+
+def _ymd(value: Any, fallback: str = "") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    iso = re.match(r"^(\d{4})-(\d{2})-(\d{2})", raw)
+    if iso:
+        return f"{iso.group(1)}-{iso.group(2)}-{iso.group(3)}"
+    dmy = re.match(r"^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$", raw)
+    if dmy:
+        day, month, year = int(dmy.group(1)), int(dmy.group(2)), dmy.group(3)
+        if len(year) == 2:
+            year = f"20{year}"
+        return f"{year}-{month:02d}-{day:02d}"
+    return fallback
+
+
+def _uuid_or(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    return text if _UUID.match(text) else fallback
 
 
 def _fill_defaults(entity: str, data: dict[str, Any]) -> dict[str, Any]:
     uid = _uid()
     out = dict(data)
     if entity == "tasks":
-        out.setdefault("assigneeId", uid)
-        out.setdefault("dueDate", _today())
+        out["assigneeId"] = _uuid_or(out.get("assigneeId"), uid)
+        out["dueDate"] = _ymd(out.get("dueDate"), _today())
         out.setdefault("status", "todo")
         out.setdefault("priority", "medium")
         out.setdefault("description", out.get("description") or "")
     if entity == "leads":
-        out.setdefault("ownerId", uid)
+        out["ownerId"] = _uuid_or(out.get("ownerId"), uid)
         out.setdefault("status", "new")
     if entity == "meetings":
         out.setdefault("organizerUserId", uid)
@@ -372,7 +396,7 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
             {"op": "create", "entity": entity, "data": data, "need_meet": bool(args.get("need_meet"))},
             f"יצירת {entity}: {label}",
         )
-        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "ask": f"ליצור {entity} «{label}» ב-Beo OS? כתוב כן."})
+        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "entity": entity, "label": label})
 
     if name == "os_update":
         entity = str(args.get("entity") or "")
@@ -383,14 +407,14 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
             {"op": "update", "entity": entity, "id": item_id, "data": data},
             f"עדכון {entity} {item_id}",
         )
-        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "ask": f"לעדכן {entity}? כתוב כן."})
+        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "entity": entity})
 
     if name == "request_delete":
         entity = str(args.get("entity") or "")
         item_id = str(args.get("id") or "")
         label = str(args.get("label") or item_id)
         pid = set_pending("delete", {"entity": entity, "id": item_id}, f"מחיקת {entity} · {label}")
-        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "ask": f"למחוק {label}? כתוב כן."})
+        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "label": label})
 
     if name == "today_brief":
         today = _today()
@@ -443,7 +467,7 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
             {"who": who, "id": item_id, "immediate": bool(args.get("immediate"))},
             summary,
         )
-        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "ask": f"{summary}\nלאשר? כתוב כן."})
+        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "summary": summary})
 
     if name == "calendar_list":
         from johnny_google import list_events
@@ -479,7 +503,7 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
                 "ok": True,
                 "needs_confirm": True,
                 "pending_id": pid,
-                "ask": f"לקבוע «{title}» ב-{start} {st}" + (" עם Google Meet" if meet else "") + "? כתוב כן.",
+                "title": title,
             }
         )
 
@@ -519,7 +543,7 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
                 "product": "ריווחית אונליין",
                 "note": None
                 if on
-                else "עדיין לא מחובר. כספים עכשיו מחשבונית ירוקה (Morning) ב-Beo OS. חיבור ריווחית יבוא עם RIVHIT_API_KEY ב-xCloud.",
+                else "ריווחית אונליין לא מחוברת. חשבוניות לא יוצאות עד שיהיה חיבור API.",
             }
         )
 
@@ -528,24 +552,16 @@ def dispatch(name: str, args: dict[str, Any]) -> str:
         subject = str(args.get("subject") or "")
         body = str(args.get("body") or "")
         pid = set_pending("mail", {"to": to, "subject": subject, "body": body}, f"מייל אל {to}: {subject}")
-        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "ask": f"לשלוח ל-{to}?\n{subject}\nכתוב תשלח או כן."})
+        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "to": to, "subject": subject})
 
     if name == "request_invoice":
-        payload = {
-            "clientId": args.get("clientId"),
-            "clientName": args.get("clientName"),
-            "email": args.get("email"),
-            "taxId": args.get("taxId"),
-            "description": args.get("description"),
-            "amount": args.get("amount"),
-            "docType": int(args.get("docType") or 320),
-        }
-        pid = set_pending(
-            "invoice",
-            payload,
-            f"חשבונית {payload.get('amount')} ₪ · {payload.get('description')} · {payload.get('clientName') or payload.get('clientId')}",
+        return _dump(
+            {
+                "ok": False,
+                "needs_confirm": False,
+                "error": "ריווחית אונליין עדיין לא מחוברת. לא הונפק כלום.",
+            }
         )
-        return _dump({"ok": True, "needs_confirm": True, "pending_id": pid, "ask": "לאשר הנפקה בחשבונית ירוקה? כתוב תנפיק או כן."})
 
     return _dump({"ok": False, "error": f"כלי לא מוכר: {name}"})
 
@@ -564,9 +580,7 @@ def execute_pending(pending: dict[str, Any]) -> str:
         log_action("mail", str(payload.get("to") or ""))
         return _dump(result)
     if kind == "invoice":
-        result = issue_invoice(payload)
-        log_action("invoice", str(payload.get("description") or ""))
-        return _dump(result)
+        return _dump({"ok": False, "error": "ריווחית אונליין לא מחוברת"})
     if kind == "specialist":
         who = str(payload.get("who") or "")
         item_id = str(payload.get("id") or "")
@@ -592,6 +606,7 @@ def execute_pending(pending: dict[str, Any]) -> str:
             result = os_update(entity, str(payload.get("id") or ""), data)
             log_action("update", f"{entity} {payload.get('id')}")
             return _dump(result)
+        data = _fill_defaults(entity, data)
         if entity == "meetings":
             from johnny_google import create_calendar_event
 

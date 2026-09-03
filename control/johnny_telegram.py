@@ -30,7 +30,7 @@ from johnny_store import (
     set_offset,
 )
 from johnny_google import connected as google_connected
-from johnny_os import os_connected
+from johnny_os import humanize_os_error, os_connected
 from johnny_tools import TOOLS, dispatch, execute_pending
 
 CTX = ssl.create_default_context()
@@ -88,8 +88,14 @@ def _tg(method: str, **params: Any) -> dict[str, Any]:
     if not token:
         return {"ok": False, "error": "no token"}
     url = f"https://api.telegram.org/bot{token}/{method}"
-    data = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None}).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
+    payload = {k: v for k, v in params.items() if v is not None}
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=40, context=CTX) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -143,7 +149,7 @@ def _live_card() -> str:
         "המשרד הוא הטלגרם בלבד. תענה על הכל כמו עובד חכם. אל תציע תפריט. אל תזכיר כלים.",
     ]
     if pending:
-        lines.append(f"- ממתין לאישור: {pending.get('summary')}")
+        lines.append(f"- ממתין לאישור של אור בטלגרם (כפתורים): {pending.get('summary')}")
     if facts:
         lines.append("מה שאתה זוכר על אור/Beo:")
         lines.extend(f"- {f}" for f in facts[-12:])
@@ -164,6 +170,139 @@ def _deny_text(text: str) -> bool:
     low = (text or "").strip().lower()
     low = re.sub(r"[.!,?؟]+", "", low).strip()
     return low in DENY or low in {c.lower() for c in DENY}
+
+
+ENTITY_HE = {
+    "tasks": "משימה",
+    "leads": "ליד",
+    "clients": "לקוח",
+    "projects": "פרויקט",
+    "meetings": "פגישה",
+    "campaigns": "קמפיין",
+    "suppliers": "ספק",
+    "deals": "עסקה",
+    "docs": "מסמך",
+    "invoices": "חשבונית",
+    "hostingrecords": "רשומת אחסון",
+    "users": "משתמש",
+}
+
+
+def _he_date(value: str) -> str:
+    raw = (value or "").strip()[:10]
+    if len(raw) == 10 and raw[4] == "-" and raw[7] == "-":
+        y, m, d = raw.split("-")
+        return f"{int(d)}.{int(m)}.{y}"
+    return (value or "").strip()
+
+
+def _confirm_keyboard(pending_id: str) -> dict[str, Any]:
+    pid = (pending_id or "x")[:8]
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "מאשר", "callback_data": f"j:yes:{pid}"},
+                {"text": "לא מאשר", "callback_data": f"j:no:{pid}"},
+            ]
+        ]
+    }
+
+
+def _pending_card(pending: dict[str, Any]) -> str:
+    kind = str(pending.get("kind") or "")
+    payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
+    if kind == "os_write":
+        op = str(payload.get("op") or "create")
+        entity = str(payload.get("entity") or "")
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        noun = ENTITY_HE.get(entity, "רשומה")
+        title = str(data.get("title") or data.get("name") or pending.get("summary") or noun)
+        due = _he_date(str(data.get("dueDate") or data.get("startDate") or ""))
+        verb = "עדכון" if op == "update" else "פתיחת"
+        lines = [f"{verb} {noun} ב-Beo OS", "", title]
+        if due:
+            lines.append(f"תאריך יעד: {due}")
+        lines += ["", "עדיין לא נשמר במערכת.", "אשר או בטל בכפתורים למטה."]
+        return "\n".join(lines)
+    if kind == "delete":
+        return "\n".join(
+            [
+                "מחיקה מ-Beo OS",
+                "",
+                str(pending.get("summary") or "רשומה"),
+                "",
+                "זה לא בוצע עדיין.",
+                "אשר או בטל בכפתורים למטה.",
+            ]
+        )
+    if kind == "calendar":
+        title = str(payload.get("title") or pending.get("summary") or "פגישה")
+        when = " ".join(
+            x for x in (_he_date(str(payload.get("startDate") or "")), str(payload.get("startTime") or "")) if x
+        )
+        meet = " עם Google Meet" if payload.get("need_meet") else ""
+        return "\n".join(
+            [
+                f"קביעת פגישה ביומן{meet}",
+                "",
+                title,
+                when,
+                "",
+                "עדיין לא נקבעה.",
+                "אשר או בטל בכפתורים למטה.",
+            ]
+        )
+    if kind == "mail":
+        return "\n".join(
+            [
+                "שליחת מייל מ-ceo@",
+                "",
+                f"אל: {payload.get('to') or ''}",
+                str(payload.get("subject") or ""),
+                "",
+                "עדיין לא נשלח.",
+                "אשר או בטל בכפתורים למטה.",
+            ]
+        )
+    if kind == "specialist":
+        who = "שי" if payload.get("who") == "shay" else "עדי" if payload.get("who") == "adi" else "הסוכן"
+        return "\n".join(
+            [
+                f"אישור ל{who}",
+                "",
+                str(pending.get("summary") or ""),
+                "",
+                "עדיין לא אושר.",
+                "אשר או בטל בכפתורים למטה.",
+            ]
+        )
+    return "\n".join(
+        [
+            str(pending.get("summary") or "פעולה ממתינה"),
+            "",
+            "עדיין לא בוצע.",
+            "אשר או בטל בכפתורים למטה.",
+        ]
+    )
+
+
+def _send_text(chat_id: int, text: str, *, confirm: bool = False) -> None:
+    pending = get_pending() if confirm else None
+    params: dict[str, Any] = {"chat_id": chat_id, "text": (text or "")[:3900]}
+    if pending and pending.get("id"):
+        params["reply_markup"] = _confirm_keyboard(str(pending.get("id")))
+    _tg("sendMessage", **params)
+
+
+def _strip_buttons(chat_id: int, message_id: int | None) -> None:
+    if not message_id:
+        return
+    _tg(
+        "editMessageReplyMarkup",
+        chat_id=chat_id,
+        message_id=message_id,
+        reply_markup={"inline_keyboard": []},
+    )
 
 
 def _response_tools() -> list[dict[str, Any]]:
@@ -311,6 +450,7 @@ def _run_agent(user_text: str, chat_id: int | None = None) -> str:
         ]
         if calls:
             inp.extend([item for item in (data.get("output") or []) if isinstance(item, dict)])
+            asked = False
             for call in calls:
                 name = str(call.get("name") or "")
                 try:
@@ -325,6 +465,15 @@ def _run_agent(user_text: str, chat_id: int | None = None) -> str:
                         "output": result,
                     }
                 )
+                try:
+                    parsed = json.loads(result)
+                    if isinstance(parsed, dict) and parsed.get("needs_confirm"):
+                        asked = True
+                except json.JSONDecodeError:
+                    pass
+            if asked:
+                pending = get_pending()
+                return _pending_card(pending) if pending else "צריך אישור, אבל משהו השתבש. תשלח שוב?"
             continue
         return _output_text(data) or "אין לי תשובה."
     return "עצרתי אחרי כמה פעולות. תגיד מה הצעד הבא."
@@ -341,72 +490,134 @@ def _done_reply(pending: dict[str, Any], raw: str) -> str:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        return raw[:800]
+        parsed = {"ok": False, "error": raw}
     if not isinstance(parsed, dict):
-        return str(parsed)[:800]
+        parsed = {"ok": False, "error": str(parsed)}
     if parsed.get("ok") is False:
-        return str(parsed.get("error") or raw)[:800]
+        errors = parsed.get("errors") if isinstance(parsed.get("errors"), list) else []
+        err = humanize_os_error(str(parsed.get("error") or raw), errors)
+        return f"לא בוצע.\n\n{err}"
     kind = str(pending.get("kind") or "")
+    payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     google = parsed.get("google") if isinstance(parsed.get("google"), dict) else {}
     meet = str(google.get("meet_link") or "")
     html_link = str(google.get("html_link") or "")
-    item = parsed.get("item")
-    item_id = parsed.get("id")
-    if not item_id and isinstance(item, dict):
-        item_id = item.get("id")
+    title = str(data.get("title") or data.get("name") or payload.get("title") or pending.get("summary") or "")
+    due = _he_date(str(data.get("dueDate") or payload.get("startDate") or ""))
     if kind == "calendar":
-        lines = ["קבעתי ביומן Google ושיקפתי ל-Beo OS."]
+        lines = ["הפגישה נקבעה ביומן Google."]
+        if title:
+            lines.extend(["", title])
         if meet:
             lines.append(f"Meet: {meet}")
-        if html_link:
-            lines.append(f"יומן: {html_link}")
+        elif html_link:
+            lines.append(html_link)
         return "\n".join(lines)
     if kind == "mail":
-        return "שלחתי מ-ceo@."
+        return f"המייל נשלח אל {payload.get('to') or 'הנמען'}."
     if kind == "invoice":
-        return "הונפקה בחשבונית ירוקה."
+        return "ריווחית אונליין עוד לא מחוברת. לא הונפק כלום."
     if kind == "delete":
         return "נמחק מ-Beo OS."
     if kind == "specialist":
-        return "אושר."
-    lines = ["עודכן ב-Beo OS."]
-    if item_id:
-        lines[0] = f"עודכן ב-Beo OS. מזהה {item_id}"
+        who = "שי" if payload.get("who") == "shay" else "עדי"
+        return f"אושר ל{who}."
+    entity = str(payload.get("entity") or "")
+    noun = ENTITY_HE.get(entity, "רשומה")
+    op = str(payload.get("op") or "create")
+    head = f"עדכנתי את ה{noun} ב-Beo OS." if op == "update" else f"פתחתי {noun} ב-Beo OS."
+    lines = [head]
+    if title:
+        lines.extend(["", title])
+    if due:
+        lines.append(f"תאריך יעד: {due}")
     if meet:
         lines.append(f"Meet: {meet}")
     return "\n".join(lines)
+
+
+def _apply_decision(chat_id: int, *, approve: bool, message_id: int | None = None) -> None:
+    pending = get_pending()
+    _strip_buttons(chat_id, message_id)
+    if not pending:
+        _send_text(chat_id, "אין פעולה ממתינה.")
+        return
+    if not approve:
+        clear_pending()
+        reply = "ביטלתי. לא נגעתי בכלום."
+        remember("לא מאשר", reply)
+        _send_text(chat_id, reply)
+        return
+    _tg("sendChatAction", chat_id=chat_id, action="typing")
+    raw = execute_pending(pending)
+    clear_pending()
+    reply = _done_reply(pending, raw)
+    log_action("confirm", pending.get("kind") or "")
+    remember("מאשר", reply)
+    _send_text(chat_id, reply)
 
 
 def _handle_text(chat_id: int, text: str, *, as_voice: bool) -> None:
     _tg("sendChatAction", chat_id=chat_id, action="typing")
     pending = get_pending()
     if pending and _deny_text(text):
-        clear_pending()
-        reply = "ביטלתי. לא נגעתי בכלום."
-    elif pending and _confirm_text(text):
-        raw = execute_pending(pending)
-        clear_pending()
-        reply = _done_reply(pending, raw)
-        log_action("confirm", pending.get("kind") or "")
-    else:
-        reply = _run_agent(text, chat_id)
+        _apply_decision(chat_id, approve=False)
+        return
+    if pending and _confirm_text(text):
+        _apply_decision(chat_id, approve=True)
+        return
+    reply = _run_agent(text, chat_id)
     remember(text, reply)
-    _tg("sendMessage", chat_id=chat_id, text=reply[:3900])
+    _send_text(chat_id, reply, confirm=bool(get_pending()))
     if _wants_voice(text, as_voice):
         audio = _speak(reply)
         if audio:
             _send_voice(chat_id, audio)
 
 
+def _handle_callback(cq: dict[str, Any]) -> None:
+    user = cq.get("from") or {}
+    msg = cq.get("message") or {}
+    chat = msg.get("chat") or {}
+    chat_id = int(chat.get("id") or 0)
+    if not _is_allowed(str(user.get("id") or ""), chat_id):
+        return
+    data = str(cq.get("data") or "")
+    _tg("answerCallbackQuery", callback_query_id=str(cq.get("id") or ""))
+    parts = data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    clicked_id = parts[2] if len(parts) > 2 else ""
+    pending = get_pending()
+    if pending and clicked_id and str(pending.get("id") or "")[:8] != clicked_id:
+        _strip_buttons(chat_id, msg.get("message_id"))
+        _send_text(chat_id, "הפעולה הזו כבר לא ממתינה.")
+        return
+    if action == "yes":
+        _apply_decision(chat_id, approve=True, message_id=msg.get("message_id"))
+        return
+    if action == "no":
+        _apply_decision(chat_id, approve=False, message_id=msg.get("message_id"))
+        return
+
+
 def _poll_once() -> None:
     if not johnny_is_on() or not _token():
         return
-    data = _tg("getUpdates", offset=offset() + 1, timeout=20, allowed_updates=json.dumps(["message"]))
+    data = _tg(
+        "getUpdates",
+        offset=offset() + 1,
+        timeout=20,
+        allowed_updates=["message", "callback_query"],
+    )
     if not data.get("ok"):
         return
     for upd in data.get("result") or []:
         upd_id = int(upd.get("update_id") or 0)
         set_offset(upd_id)
+        if upd.get("callback_query"):
+            _handle_callback(upd["callback_query"] if isinstance(upd.get("callback_query"), dict) else {})
+            continue
         msg = upd.get("message") or {}
         chat = msg.get("chat") or {}
         user = msg.get("from") or {}
@@ -414,27 +625,24 @@ def _poll_once() -> None:
         if not _is_allowed(str(user.get("id") or ""), chat_id):
             continue
         if not johnny_is_on():
-            _tg("sendMessage", chat_id=chat_id, text="אני כבוי עכשיו. תדליק אותי מלוח ג'וני ב-Beo OS.")
+            _send_text(chat_id, "אני כבוי עכשיו. תדליק אותי מלוח ג'וני ב-Beo OS.")
             continue
         voice = msg.get("voice") or msg.get("audio")
         if voice and voice.get("file_id"):
             blob = _tg_file(str(voice["file_id"]))
             text = _transcribe(blob or b"") if blob else ""
             if not text:
-                _tg("sendMessage", chat_id=chat_id, text="לא תפסתי את ההקלטה. תכתוב?")
+                _send_text(chat_id, "לא תפסתי את ההקלטה. תכתוב?")
                 continue
-            _tg("sendMessage", chat_id=chat_id, text=f"שמעתי: {text[:400]}")
+            _send_text(chat_id, f"שמעתי: {text[:400]}")
             _handle_text(chat_id, text, as_voice=True)
             continue
         text = str(msg.get("text") or "").strip()
         if text in {"/start", "/help"}:
-            _tg(
-                "sendMessage",
-                chat_id=chat_id,
-                text=(
-                    "היי, אני ג'וני. תדבר חופשי — גם קול — כמו עם עובד. על Beo, על היום, על מה שבא.\n"
-                    "אם צריך לשנות משהו בחברה (יומן, מייל, משימה, חשבונית, שי/עדי) — אשאל כן קודם."
-                ),
+            _send_text(
+                chat_id,
+                "היי, אני ג'וני. תדבר חופשי — גם קול — כמו עם עובד.\n\n"
+                "אם צריך לשנות משהו בחברה, אשלח בקשה עם כפתורי מאשר / לא מאשר.",
             )
             continue
         if text:

@@ -46,5 +46,5 @@ def overview() -> dict:
         "rivhit": rivhit_connected(),
         "approve_writes": True,
         "chat_api": "responses",
-        "build": "luna-responses",
+        "build": "confirm-buttons",
     }

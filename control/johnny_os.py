@@ -58,9 +58,59 @@ def _headers() -> dict[str, str]:
     }
 
 
+def _scrub(text: str) -> str:
+    return (
+        (text or "")
+        .replace("Firebase/Firestore", "")
+        .replace("Firebase", "")
+        .replace("Firestore", "")
+        .replace("firebase", "")
+        .replace("firestore", "")
+        .strip()
+    )
+
+
+def humanize_os_error(raw: str, errors: list[Any] | None = None) -> str:
+    details = [str(x).strip() for x in (errors or []) if str(x).strip()]
+    details = [_scrub(x) for x in details if _scrub(x)]
+    if details:
+        return "לא נשמר ב-Beo OS:\n" + "\n".join(details[:6])
+    blob = (raw or "").lower()
+    if "firebase" in blob or "firestore" in blob:
+        return "לא הצלחתי לשמור ב-Beo OS."
+    if "validation" in blob:
+        return "חסרים פרטים (כותרת, אחראי ותאריך). לא נשמר כלום."
+    if "supabase_not_configured" in blob or "missing_service_role" in blob:
+        return "חסר חיבור למסד הנתונים ב-Beo OS. לא נשמר כלום."
+    if "unauthorized" in blob or "invalid_api_key" in blob:
+        return "מפתח החיבור ל-Beo OS לא תואם. לא נשמר כלום."
+    if "unknown_or_blocked" in blob:
+        return "סוג הרשומה הזה עדיין לא פתוח ב-Beo OS."
+    if blob.startswith("os http") or "http 5" in blob:
+        return "Beo OS לא ענה עכשיו. לא נשמר כלום."
+    text = _scrub((raw or "").strip())
+    if not text:
+        return "לא הצלחתי לשמור ב-Beo OS."
+    if any(ch.isascii() and ch.isalpha() for ch in text) and " " not in text.replace("_", ""):
+        return "לא הצלחתי לשמור ב-Beo OS."
+    return text[:400]
+
+
+def _clean_os_payload(data: dict[str, Any]) -> dict[str, Any]:
+    if data.get("ok") is True:
+        return data
+    err = str(data.get("error") or "")
+    errors = data.get("errors") if isinstance(data.get("errors"), list) else []
+    if data.get("ok") is False or err:
+        data["ok"] = False
+        data["error"] = humanize_os_error(err or str(data.get("message") or ""), errors)
+        data.pop("message", None)
+    return data
+
+
 def _request(method: str, path: str, *, query: dict[str, Any] | None = None, body: dict[str, Any] | None = None) -> dict[str, Any]:
     if not os_connected():
-        return {"ok": False, "error": "חסר BEO_OS_URL או BOT_API_KEY"}
+        return {"ok": False, "error": "Beo OS לא מחובר. חסר מפתח או כתובת."}
     qs = urllib.parse.urlencode({k: v for k, v in (query or {}).items() if v not in (None, "")})
     url = f"{os_url()}{path}"
     if qs:
@@ -74,15 +124,17 @@ def _request(method: str, path: str, *, query: dict[str, Any] | None = None, bod
         try:
             data = json.loads(exc.read().decode("utf-8"))
         except Exception:
-            return {"ok": False, "error": f"OS HTTP {exc.code}"}
+            return {"ok": False, "error": humanize_os_error(f"OS HTTP {exc.code}")}
         if isinstance(data, dict):
             data.setdefault("ok", False)
             data.setdefault("error", data.get("message") or f"OS HTTP {exc.code}")
-            return data
-        return {"ok": False, "error": f"OS HTTP {exc.code}"}
-    except Exception as exc:
-        return {"ok": False, "error": f"OS לא זמין: {type(exc).__name__}"}
-    return data if isinstance(data, dict) else {"ok": False, "error": "תשובה לא תקינה מ-OS"}
+            return _clean_os_payload(data)
+        return {"ok": False, "error": humanize_os_error(f"OS HTTP {exc.code}")}
+    except Exception:
+        return {"ok": False, "error": "Beo OS לא זמין ברגע זה."}
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "תשובה לא תקינה מ-Beo OS"}
+    return _clean_os_payload(data)
 
 
 def os_get(entity: str, *, id: str = "", **filters: Any) -> dict[str, Any]:
@@ -127,7 +179,7 @@ def resolve_actor_id() -> str:
     existing = _env("JOHNNY_ACTOR_USER_ID")
     if existing:
         return existing
-    email = _env("JOHNNY_ACTOR_EMAIL", "ceo@beosystem.co.il").lower()
+    email = _env("JOHNNY_ACTOR_EMAIL", "ceo@beosystem.com").lower()
     result = os_get("users", limit=200)
     for row in result.get("items") or []:
         if not isinstance(row, dict):
